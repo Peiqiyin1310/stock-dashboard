@@ -1,0 +1,48 @@
+name: Auto Refresh Dashboard
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'          # 每 10 分钟：行情 + 快讯 + 日历 + 复盘(盘后自动)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+# 同一时间只跑一个实例，避免并发写 data.json 冲突
+concurrency:
+  group: dashboard-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate snapshots (行情 / 快讯 / 日历 / 复盘)
+        run: |
+          node _gen.js        || echo "[warn] _gen.js 部分标失败（可接受）"
+          node _gen_news.js   || echo "[warn] _gen_news.js 抓取失败"
+          node _gen_calendar.js || echo "[warn] _gen_calendar.js 失败"
+          node _gen_review.js || echo "[warn] _gen_review.js 失败（将沿用已有复盘）"
+
+      - name: Build & validate
+        run: |
+          node _build.js
+          node --check stock-dashboard/_check.js
+          node _validate.js || echo "[FAIL] _validate.js 未通过，请检查数据"
+
+      - name: Push to gh-pages (GitHub Pages 自动发布)
+        run: |
+          git config user.name "workbuddy-bot"
+          git config user.email "workbuddy-bot@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && echo "无数据变化，跳过发布" && exit 0
+          git commit -m "auto refresh $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push origin HEAD:gh-pages --force

@@ -1,0 +1,10 @@
+# 本地 WorkBuddy 工作区数据（不提交）
+.workbuddy/
+
+# 构建中间产物
+_check.js
+
+# 临时/缓存文件
+probe.txt
+review_snapshot.json.bak
+review_snapshot.cloud.json
