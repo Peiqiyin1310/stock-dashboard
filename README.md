@@ -19,7 +19,7 @@ GitHub Actions (cron 每10分钟)
   ├─ node _build.js        把 data.json 内嵌进 index.html
   └─ node _validate.js     校验（无 NaN / 26标的 / 10模块复盘）
         ↓
-push 到 gh-pages 分支 → GitHub Pages 自动发布
+官方 Pages action（upload-pages-artifact + deploy-pages）→ GitHub Pages 自动发布
 ```
 
 前端页面内还会**实时直连**腾讯行情 JSONP（30秒~5分钟）+ 三源快讯 JSONP（60秒）+ 后台快照兜底，打开即最新。
@@ -41,7 +41,7 @@ push 到 gh-pages 分支 → GitHub Pages 自动发布
 ## 首次部署（只需一次）
 
 1. 把本目录推送到 GitHub 公开仓库（公开仓库 Actions 无限分钟）。
-2. 仓库 Settings → Pages → Source 选 **Deploy from a branch** → 分支 `gh-pages` → `/ (root)` → Save。
+2. 仓库 Settings → Pages → Build and deployment → Source 选 **GitHub Actions**（保存后无需再选分支，workflow 会自动部署）。
 3. 打开 `https://<用户名>.github.io/<仓库名>/` 即可。之后每 10 分钟自动刷新，无需任何操作。
 
 ## 数据说明
