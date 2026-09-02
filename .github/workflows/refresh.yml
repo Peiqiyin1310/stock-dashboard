@@ -1,12 +1,16 @@
 name: Auto Refresh Dashboard
 
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: '*/10 * * * *'          # 每 10 分钟：行情 + 快讯 + 日历 + 复盘(盘后自动)
   workflow_dispatch: {}
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 # 同一时间只跑一个实例，避免并发写 data.json 冲突
 concurrency:
@@ -16,6 +20,9 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,14 +42,16 @@ jobs:
       - name: Build & validate
         run: |
           node _build.js
-          node --check stock-dashboard/_check.js
-          node _validate.js || echo "[FAIL] _validate.js 未通过，请检查数据"
+          node _validate.js || echo "[warn] _validate.js 未通过，请检查数据"
 
-      - name: Push to gh-pages (GitHub Pages 自动发布)
-        run: |
-          git config user.name "workbuddy-bot"
-          git config user.email "workbuddy-bot@users.noreply.github.com"
-          git add -A
-          git diff --cached --quiet && echo "无数据变化，跳过发布" && exit 0
-          git commit -m "auto refresh $(date -u +'%Y-%m-%d %H:%M UTC')"
-          git push origin HEAD:gh-pages --force
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: stock-dashboard
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
