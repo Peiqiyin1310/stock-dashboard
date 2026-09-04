@@ -9,20 +9,24 @@ const path = require("path");
 const SNAP_FILE = path.join(__dirname, "review_snapshot.json");
 const UT = "fa5fd1943c7b386f172d6893dbfba10b";
 
-function get(url) {
+function get(url, extraHeaders) {
   return new Promise((res, rej) => {
-    const req = https.get(url, { timeout: 20000, headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", Referer: "https://quote.eastmoney.com/" } }, (r) => {
+    const headers = Object.assign(
+      { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", Referer: "https://quote.eastmoney.com/" },
+      extraHeaders || {}
+    );
+    const req = https.get(url, { timeout: 20000, headers }, (r) => {
       let d = ""; r.on("data", (c) => d += c); r.on("end", () => res({ status: r.statusCode, data: d }));
     });
     req.on("timeout", () => { req.destroy(); rej(new Error("timeout")); });
     req.on("error", (e) => rej(e));
   });
 }
-async function jget(url, tries = 3) {
+async function jget(url, tries = 3, extraHeaders) {
   let last;
   for (let i = 0; i < tries; i++) {
     try {
-      const r = await get(url);
+      const r = await get(url, extraHeaders);
       if (r.status === 200) return JSON.parse(r.data);
       last = new Error("http " + r.status);
     } catch (e) { last = e; }
@@ -41,6 +45,77 @@ async function jgetAny(pathAndQuery, tries = 2) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const yi = (v) => v == null ? 0 : +(v / 1e8).toFixed(2);          // 元 → 亿
 const round1 = (v) => v == null ? 0 : +(+v).toFixed(1);
+const round2 = (v) => v == null ? null : +(+v).toFixed(2);
+const round4 = (v) => v == null ? null : +(+v).toFixed(4);
+
+/* 北京时间减去 N 天，返回 YYYY-MM-DD */
+function bjDateMinus(n) {
+  const d = new Date(Date.now() + 8 * 3600 * 1000 - n * 86400000);
+  return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0");
+}
+
+/* ===== 估值：中证全指(000985) 官方 PE + 历史分位 =====
+   中证指数官网公开接口，返回每日 peg(市盈率) 序列，可自行计算 3/5/10 年分位。
+   替代此前"无源时继承旧值"的做法，保证估值每天真实更新。 */
+async function fetchValuation() {
+  const end = bjNow().ymd;                                   // 20260904
+  const start = (parseInt(end.slice(0, 4)) - 10) + end.slice(4);  // 十年前
+  const url = "https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode=000985&startDate=" + start + "&endDate=" + end;
+  const j = await jget(url, 2, { Referer: "https://www.csindex.com.cn/" });
+  const rows = (j && j.data) || [];
+  const s = rows
+    .filter((x) => x && x.tradeDate && x.peg != null && x.peg > 0)
+    .map((x) => [String(x.tradeDate), +x.peg])
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  if (s.length < 60) return null;                            // 数据太少视为失败
+  const lastDay = s[s.length - 1][0];
+  const pe = round2(s[s.length - 1][1]);
+  /* 分位：窗口内「小于等于当前 PE」的样本占比 */
+  const pctIn = (years) => {
+    const cut = String(parseInt(end.slice(0, 4)) - years) + end.slice(4);
+    const win = s.filter((x) => x[0] >= cut).map((x) => x[1]);
+    if (win.length < 60) return null;
+    return round1((win.filter((v) => v <= pe).length / win.length) * 100);
+  };
+  return {
+    pe,
+    pePct3y: pctIn(3), pePct5y: pctIn(5), pePct10y: pctIn(10),
+    pb: null, div: null,                                     // 中证接口无 PB/股息率，页面不展示
+    date: lastDay.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3"),
+    src: "中证指数官网",
+  };
+}
+
+/* ===== 宏观：中债国债收益率曲线（中债登官方） =====
+   页面表格列顺序固定：3月, 6月, 1年, 3年, 5年, 7年, 10年, 30年。
+   2 年期官网不公布，用 1 年与 3 年线性插值得到。 */
+async function fetchMacro() {
+  for (let d = 0; d < 7; d++) {                              // 非交易日往前回溯
+    const dt = bjDateMinus(d);
+    try {
+      const url = "https://yield.chinabond.com.cn/cbweb-cbrc-web/cbrc/queryGjqxInfo?workTime=" + dt + "&locale=zh_CN";
+      const r = await get(url, { Referer: "https://yield.chinabond.com.cn/" });
+      if (r.status !== 200) continue;
+      const h = r.data || "";
+      const rowM = h.match(/中债国债收益率曲线[\s\S]{0,1500}?<\/tr>/);
+      const dateM = h.match(/<th>(\d{4}-\d{2}-\d{2})\(%\)<\/th>/);
+      if (!rowM) continue;
+      const tds = [...rowM[0].matchAll(/<td>\s*([0-9.]+)\s*<\/td>/g)].map((x) => parseFloat(x[1]));
+      if (tds.length < 8) continue;
+      const y1 = tds[2], y3 = tds[3], y10 = tds[6];
+      const cn2y = round4((y1 + y3) / 2);
+      const cn10y = round4(y10);
+      const termSpread = round1((cn10y - cn2y) * 100);
+      return {
+        cn10y, cn2y, termSpread,
+        curveFormD: termSpread >= 80 ? "牛陡" : termSpread >= 40 ? "中性偏陡" : termSpread >= 20 ? "中性" : "熊平",
+        date: dateM ? dateM[1] : dt,
+        src: "中债登",
+      };
+    } catch (e) { /* 换上一天 */ }
+  }
+  return null;
+}
 
 /* 北京时间（云端 runner 可能是 UTC，统一按 UTC+8 计算） */
 function bjNow() {
@@ -140,14 +215,22 @@ async function fetchReviewSnapshot(prevReview) {
     trendShort: pctAvg > 0.3 ? "上行" : pctAvg < -0.3 ? "回调" : "震荡",
     trendLong: "—",
   };
-  // 估值/宏观：继承旧值（不天天变），云端无免费直连源时保持连续
+  // 估值/宏观：抓中证官方 PE 与中债登收益率曲线；仅当抓取失败时才继承旧值（保证连续、绝不编造）
   const prev = prevReview || {};
+  const [val, mac] = await Promise.all([
+    fetchValuation().catch(() => null),
+    fetchMacro().catch(() => null),
+  ]);
+  if (val) console.log("[review] 估值：中证全指 PE " + val.pe + " 倍 · 10年分位 " + val.pePct10y + "% · " + val.date);
+  else console.log("[review] 估值抓取失败，沿用既有值");
+  if (mac) console.log("[review] 宏观：10年期国债 " + mac.cn10y + "% · 期限利差 " + mac.termSpread + "bps · " + mac.date);
+  else console.log("[review] 宏观抓取失败，沿用既有值");
   const snap = {
     tradeDate: bj.date,
     breadth: { red: idx.red, green: idx.green, zero: idx.zero, updownRatio: ur, uplimit: zt.uplimit, dnlimit: zt.dnlimit, high10: 0, low10: 0 },
     trade: { money: idx.money, moneyRatio10d: null, sh: idx.sh, sz: idx.sz, cyb: idx.cyb },
     profile,
-    valuation: prev.valuation || {}, macro: prev.macro || {},
+    valuation: val || prev.valuation || {}, macro: mac || prev.macro || {},
     plateFlowTop: sec.plateFlowTop, plateFlowBottom: sec.plateFlowBottom, mainNetIn: main,
     plateTop: sec.plateTop, plateBottom: sec.plateBottom, conceptTop: sec.conceptTop, conceptBottom: sec.conceptBottom,
     emotionRef: {},
