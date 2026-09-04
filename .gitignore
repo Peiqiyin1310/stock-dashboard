@@ -8,3 +8,7 @@ _check.js
 probe.txt
 review_snapshot.json.bak
 review_snapshot.cloud.json
+
+# 旧链接代理服务（仅 WorkBuddy 沙箱发布用，不属于 GitHub Pages 项目）
+stock-dashboard/server.js
+stock-dashboard/last_good.html
