@@ -1026,21 +1026,47 @@ function renderReview(){
       '<span class="rv-tag">仅列 L1/L2 · 完整快讯见「财经要闻」</span>'));
   }
 
-  /* ② 市场概况（全部由当日数据推算） */
+  /* ② 今日概览（行情 + 量能 + 情绪灯，全部由当日数据推算） */
   {
-    const b=R.breadth||{},t=R.trade||{},ur=b.updownRatio||0,ul=b.uplimit||0;
+    const b=R.breadth||{},t=R.trade||{},z=R.zt||{},ur=b.updownRatio||0,ul=b.uplimit||0;
     const verdict = ur>=1.2?`普涨（涨跌比 ${ur}），情绪与权重共振。`
       :ur<0.9?`分化（涨跌比 ${ur}），指数不代表个股，注意结构性风险。`
       :`均衡（涨跌比 ${ur}），看主线能否延续。`;
-    const mr10=t.moneyRatio10d, w10=(b.high10||0)+(b.low10||0);
+    const mr5=t.moneyRatio5d, mr10=t.moneyRatio10d;
+    const volTxt=mr5!=null?`5日均量 ${mr5}% · ${mr5<90?'缩量':'放量'}`:'（量比待补）';
+    const zbcTxt=z.zbc!=null?`${z.zbc}（炸板率 ${z.zbrate}%）`:'—';
     const body=rvTable(['指标','数值','解读'],[
       ['涨 / 跌 / 平',`${b.red} / ${b.green} / ${b.zero}`,`涨跌比 ${ur} · ${ur<1?'空方略占优':'多方占优'}`],
-      ['涨停 / 跌停',`${ul} / ${b.dnlimit}`,(ul>=50?'情绪偏热':'情绪一般')+`（涨停 ${ul} 只）`],
-      ['成交额',`${(t.money/10000).toFixed(2)} 万亿`,mr10!=null?`10日均量 ${mr10}% · ${mr10<90?'缩量':'量能正常'}`:'成交额（均量比待补）'],
+      ['涨停 / 跌停 / 炸板',`${ul} / ${b.dnlimit} / ${zbcTxt}`,(z.stage||'')?`情绪${z.stage}（涨停 ${ul} 只）`:'涨停 '+ul+' 只'],
+      ['成交额',`${(t.money/10000).toFixed(2)} 万亿`,volTxt],
       ['上证 / 深成 / 创业板',`${t.sh.close} / ${t.sz.close} / ${t.cyb.close}`,`${rvPct(t.sh.pct)} ${rvPct(t.sz.pct)} ${rvPct(t.cyb.pct)}`],
-      ['创10日新高 / 新低',w10?`${b.high10} / ${b.low10}`:'— / —',w10?(b.high10>b.low10*3?'新高远多于新低，宽度健康':'新低偏多，宽度偏弱'):'数据待补'],
     ])+rvNote('一句话：'+verdict);
-    M.push(rvMod('②','市场概况',body));
+    M.push(rvMod('②','今日概览',body));
+  }
+
+  /* ③ 涨停复盘（梯队 / 炸板率 / 连板高度 / 情绪环比） */
+  {
+    const b=R.breadth||{},z=R.zt||{},ul=b.uplimit||0;
+    const l3=top(R.ladder3,10), l2=top(R.ladder2,20), hot=top(R.lhbHot,8);
+    let body='';
+    const prevTxt=z.prevUplimit!=null?`昨日 ${z.prevUplimit} 只 · ${ul>=z.prevUplimit?'↑':'↓'} ${Math.abs(ul-(z.prevUplimit||0))} 只`:'昨日对比待补';
+    const zbTxt=z.zbc!=null?`${z.zbc} 只 / ${z.zbrate}%`:'待补';
+    const zbJudge=z.zbrate==null?'':(z.zbrate<15?'封板质量高，分歧小':z.zbrate>30?'分歧大，警惕退潮':'封板质量正常');
+    const hJudge=!z.maxLbc?'':(z.maxLbc>=5?'空间板打开，题材有持续性':z.maxLbc>=3?'高度中等，聚焦主线':'高度受限，谨慎追高');
+    body+=rvTable(['指标','数值','解读'],[
+      ['涨停 / 跌停',`${ul} / ${b.dnlimit!=null?b.dnlimit:'—'}`,prevTxt],
+      ['炸板 / 炸板率',zbTxt,zbJudge||'炸板池数据待补'],
+      ['最高连板',z.maxLbc?`${z.maxLbc} 板`:'—',hJudge||'梯队数据待补'],
+      ['首板 / 2板 / 3板+',`${z.l1!=null?z.l1:((R.ladder1Count)||0)} / ${z.l2c!=null?z.l2c:l2.length} / ${z.l3c!=null?z.l3c:l3.length}`,'首板多=扩散，连板多=聚焦'],
+    ]);
+    if(l3.length) body+=`<div class="section-title" style="margin-top:10px">三连板及以上</div>`
+      +rvTable(['个股','连板数','定性'],l3.map(x=>[x.n,(x.d||3)+' 板',x.n.indexOf('ST')>=0?'情绪炒作，注意风险':'连板身位股']));
+    if(l2.length) body+=`<div class="section-title" style="margin-top:10px">二连板（${l2.length} 只）</div>`
+      +`<div class="rv-tags">${l2.map(x=>`<span class="rv-chip">${x.n}</span>`).join('')}</div>`;
+    if(hot.length) body+=`<div class="section-title" style="margin-top:10px">游资席位</div>`
+      +rvTable(['席位','买入(亿)','个股'],hot.map(x=>[x.seat,x.v,x.stocks]));
+    body+=rvNote(`情绪定位：${z.stage||'待评估'}。涨停环比看扩散/聚焦，炸板率看封板质量，高度板看题材空间。`);
+    M.push(rvMod('③','涨停复盘 · 涨停梯队',body));
   }
 
   /* ③ 资金面（加仓/减仓由当日板块资金流直接生成） */
@@ -1095,17 +1121,17 @@ function renderReview(){
       `<span class="rv-tag">中债 ${cell(mc.date,'—')} · 估值 ${cell(v.date,'—')}</span>`));
   }
 
-  /* ⑥ 涨停梯队 */
+  /* ⑥ 隔夜外围（美股 · 港股 · 黄金，带数据日期） */
   {
-    const l3=top(R.ladder3,10), l2=top(R.ladder2,20), hot=top(R.lhbHot,8);
-    let body='';
-    if(l3.length) body+=rvTable(['三连板','定性'],l3.map(x=>[x.n,x.n.indexOf('ST')>=0?'情绪炒作，注意风险':'连板身位股']));
-    else body+=rvNote(`今日涨停 ${(R.breadth||{}).uplimit||0} 只${(R.breadth||{}).dnlimit?`、跌停 ${R.breadth.dnlimit} 只`:''}；连板梯队明细待补。`);
-    if(l2.length) body+=`<div class="section-title" style="margin-top:10px">二连板（${l2.length} 只）</div>`
-      +`<div class="rv-tags">${l2.map(x=>`<span class="rv-chip">${x.n}</span>`).join('')}</div>`;
-    if(hot.length) body+=`<div class="section-title" style="margin-top:10px">游资席位</div>`
-      +rvTable(['席位','买入(亿)','个股'],hot.map(x=>[x.seat,x.v,x.stocks]));
-    M.push(rvMod('⑥','涨停梯队',body));
+    const us=A(R.us), hk=A(R.hk), gd=A(R.gold);
+    const rows=[...us,...hk,...gd].map(x=>[x.n,`<span class="num">${typeof x.price==='number'?x.price.toLocaleString():cell(x.price)}</span>`,rvPct(x.pct),cell(x.d,'—')]);
+    const body=rows.length?rvTable(['指数/标的','收盘','涨跌幅','数据日期'],rows):'<div class="nodata">外围行情数据待补</div>';
+    const ndx=us.find(x=>x.n==='纳指100'), dji=us.find(x=>x.n==='道琼斯');
+    const impact=ndx&&dji?(ndx.pct<0&&dji.pct>0
+      ?`科技承压、价值走强（道指 ${dji.pct>0?'+':''}${dji.pct}% vs 纳指100 ${ndx.pct}%）：高位科技线或受压制，留意高低切换。`
+      :`美股整体${ndx.pct>=0?'走强':'走弱'}，对A股风险偏好${ndx.pct>=0?'有带动':'形成压制'}。`):'美股数据待补。';
+    const stale=rows.some(r=>{const m=String(r[3]).match(/2026-0(\d)-(\d+)/);return m&&+(m[1])===8&&+(m[2])<25;});
+    M.push(rvMod('⑥','隔夜外围（美股·港股·黄金）',body+rvNote('影响：'+impact+(stale?' ⚠️ 检测到历史日期，数据源可能受限。':'')), '<span class="rv-tag">美股为最近收盘（隔夜），港股/A股时段为当日</span>'));
   }
 
   /* ⑦ 主升形态（按当日个股资金流筛选，不预设股票池） */
@@ -1113,51 +1139,61 @@ function renderReview(){
     const mn=top(R.mainNetIn,8);
     const tb=mn.length?rvTable(['标的','主力净流入(亿)','形态'],mn.map(x=>[x.n,`+${x.v}`,'资金持续流入的趋势票']))
       :'<div class="nodata">今日无个股资金明细（待补）</div>';
-    M.push(rvMod('⑦','主升形态',tb+rvNote('口径：当日主力净流入居前、且属领涨板块的标的，由数据规则自动筛出。')));
+    M.push(rvMod('⑧','主升形态',tb+rvNote('口径：当日主力净流入居前、且属领涨板块的标的，由数据规则自动筛出。')));
   }
 
-  /* ⑧ 情绪周期与龙头战法 */
+  /* ⑨ 情绪周期与龙头战法 */
   {
-    const pf=R.profile||{},b=R.breadth||{};
+    const pf=R.profile||{},b=R.breadth||{},z=R.zt||{};
     const rows=[['情绪',pf.sentiment],['大小盘',pf.cap],['板块宽度',pf.sectorWidth],
       ['个股宽度',pf.stockWidth],['量能',pf.volume],['短线趋势',pf.trendShort]]
       .filter(r=>cell(r[1],'')!=='');
     const ur=b.updownRatio||0, ul=b.uplimit||0;
-    const cycle = (ul>=60&&ur>=1.2)?`情绪高潮（涨停 ${ul} 只、涨跌比 ${ur}）：主线可持有，跟风股防退潮。`
+    const stage=z.stage||'';
+    const cycle = stage==='高潮'?`情绪高潮（涨停 ${ul} 只、涨跌比 ${ur}）：主线可持有，跟风股防退潮。`
+      :stage==='发酵'?`情绪发酵（涨停 ${ul} 只、环比抬升）：观察首板能否晋级，聚焦主线龙头。`
+      :stage==='退潮'?`情绪退潮（涨停缩量、炸板率 ${z.zbrate!=null?z.zbrate:'—'}%）：降低预期，等情绪冰点后的修复。`
+      :stage==='冰点'?`情绪冰点（涨停仅 ${ul} 只）：机会在超跌反弹，等待放量确认。`
+      :(ul>=60&&ur>=1.2)?`情绪高潮（涨停 ${ul} 只、涨跌比 ${ur}）：主线可持有，跟风股防退潮。`
       :(ul>=40)?`情绪偏热但分化（涨停 ${ul} 只、涨跌比 ${ur}）：只做主线龙头，回避中位跟风。`
       :`情绪平淡（涨停 ${ul} 只、涨跌比 ${ur}）：控制仓位，等量能恢复。`;
     const pt=top(R.plateTop,3);
     const leaders=pt.length?rvTable(['主线龙头','所属板块','板块涨幅'],pt.map(x=>[cell(x.lead,'—'),x.n,rvPct(x.v)])):'';
-    M.push(rvMod('⑧','情绪与龙头',(rows.length?rvTable(['维度','状态'],rows):'')+rvNote('周期定位：'+cycle)+leaders));
+    M.push(rvMod('⑨','情绪与龙头',(rows.length?rvTable(['维度','状态'],rows):'')+rvNote('周期定位：'+cycle)+leaders));
   }
 
-  /* ⑨ 隔夜美股 */
+  /* ⑩ 涨跌逻辑与后市展望（要点由当日量能/估值/板块/消息规则推算） */
   {
-    const us=A(R.us);
-    const usT=us.length?rvTable(['指数','收盘','涨跌幅'],us.map(x=>[x.n,`<span class="num">${x.price.toLocaleString()}</span>`,rvPct(x.pct)]))
-      :'<div class="nodata">暂无美股数据</div>';
-    const ndx=us.find(x=>x.n==='纳指100'), dji=us.find(x=>x.n==='道琼斯');
-    const impact=ndx&&dji?(ndx.pct<0&&dji.pct>0
-      ?`科技承压、价值走强（道指 ${dji.pct>0?'+':''}${dji.pct}% vs 纳指100 ${ndx.pct}%）：高位科技线或受压制，留意高低切换。`
-      :`美股整体${ndx.pct>=0?'走强':'走弱'}，对A股风险偏好${ndx.pct>=0?'有带动':'形成压制'}。`):'美股数据待补。';
-    M.push(rvMod('⑨','隔夜美股',usT+rvNote('影响：'+impact)));
-  }
-
-  /* ⑩ 后市展望（要点由当日估值/量能/板块推算） */
-  {
-    const v=R.valuation||{},t=R.trade||{};
-    const pt=top(R.plateTop,2), pb=top(R.plateBottom,2);
-    const rows=[
-      ['指数环境',`估值10年分位 ${v.pePct10y||'—'}%${t.moneyRatio10d!=null?`、成交额为10日均量 ${t.moneyRatio10d}%`:''}：`
-        +`${t.moneyRatio10d!=null?(t.moneyRatio10d<90?'量能不足，指数以震荡为主':'量能尚可，结构性行情为主'):'以结构性行情为主'}`],
-      ['关注主线',pt.length?pt.map(x=>`${x.n}（${x.v>0?'+':''}${x.v}%）`).join('、'):'待补'],
-      ['规避方向',pb.length?pb.map(x=>`${x.n}（${x.v}%）`).join('、'):'待补'],
-      ['风险提示','以上为数据规则自动推演，非投资建议；高位分歧阶段注意中位股补跌。'],
+    const v=R.valuation||{},t=R.trade||{},z=R.zt||{};
+    const pt=top(R.plateTop,2), pb=top(R.plateBottom,2), ft=top(R.plateFlowTop,2);
+    /* 涨跌逻辑归因：量价共振 → 主线；L1 消息 → 事件驱动 */
+    const mainLine=pt[0]&&ft.some(x=>x.n===pt[0].n)
+      ?`${pt[0].n}（${pt[0].v>0?'+':''}${pt[0].v}%，且主力净流入居前）：量价共振，主线明确`
+      :pt[0]&&ft[0]?`领涨为${pt[0].n}（${pt[0].v>0?'+':''}${pt[0].v}%）、流入第一为${ft[0].n}（${ft[0].v>0?'+':''}${ft[0].v}亿）：方向不一致，注意轮动而非主攻`
+      :'板块数据待补';
+    const l1=A(R.news).filter(m=>m.level==='L1').slice(0,2)
+      .map(m=>`${m.dir||'中性'}：${m.title.slice(0,28)}…`).join('；');
+    const logicRows=[
+      ['主线驱动',mainLine],
+      ['事件驱动',l1||'今日无 L1 级重磅消息'],
+      ['大小盘',cell((R.profile||{}).cap,'—')],
     ];
-    M.push(rvMod('⑩','后市展望',rvTable(['维度','要点'],rows)));
+    const risk=[];
+    if(v.pePct10y!=null&&v.pePct10y>80) risk.push(`估值10年分位 ${v.pePct10y}%（偏高）`);
+    if(z.zbrate!=null&&z.zbrate>30) risk.push(`炸板率 ${z.zbrate}%（分歧大）`);
+    if(t.moneyRatio5d!=null&&t.moneyRatio5d<90) risk.push(`量能为5日均量 ${t.moneyRatio5d}%（缩量）`);
+    const outlookRows=[
+      ['情绪定位',(z.stage||'待评估')+(z.prevUplimit!=null?`（涨停环比 ${((z.uplimit||0)>=z.prevUplimit)?'↑':'↓'}）`:'')],
+      ['关注方向',pt.length?pt.map(x=>`${x.n}（${x.v>0?'+':''}${x.v}%）`).join('、')+'；看首板→连板晋级确认':'待补'],
+      ['规避方向',pb.length?pb.map(x=>`${x.n}（${x.v}%）`).join('、'):'待补'],
+      ['风险提示',(risk.length?risk.join('；'):'暂无明显风险信号')+'。以上为数据规则自动推演，非投资建议。'],
+    ];
+    M.push(rvMod('⑩','涨跌逻辑与后市展望',
+      `<div class="section-title">涨跌逻辑（规则归因）</div>`+rvTable(['维度','要点'],logicRows)
+      +`<div class="section-title" style="margin-top:10px">后市展望</div>`+rvTable(['维度','要点'],outlookRows)));
   }
 
-  p.innerHTML=`<div class="meta" style="padding:0 0 10px">复盘 ${R.tradeDate} · 更新于 ${new Date(R.generatedAt).toLocaleString('zh-CN',{hour12:false})} · 数据源：自选股MCP(涨跌分布/资金流/板块/宏观) + 腾讯行情 + 新浪外汇/快讯 · 规则自动推演，非投资建议</div>`+M.join('');
+  p.innerHTML=`<div class="meta" style="padding:0 0 10px">复盘 ${R.tradeDate} · 更新于 ${new Date(R.generatedAt).toLocaleString('zh-CN',{hour12:false})} · 数据源：东方财富(盘面/资金/涨停池) + 腾讯(K线) + 中证指数(估值) + 中债登(利率) + 新浪(外汇/快讯) · 情绪阶段与展望为规则自动推演，非投资建议</div>`+M.join('');
 }
 function switchTab(id){
   state.cur=id;

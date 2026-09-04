@@ -148,15 +148,61 @@ async function fetchIndex() {
 async function fetchZtDt(ymd) {
   const zt = await jget("https://push2ex.eastmoney.com/getTopicZTPool?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.ztzt&Pageindex=0&pagesize=400&sort=fbt%3Aasc&date=" + ymd);
   const pool = (zt.data && zt.data.pool) || [];
-  const ladder3 = pool.filter((x) => (x.lbc || 1) >= 3).map((x) => ({ n: x.n }));
+  const ladder3 = pool.filter((x) => (x.lbc || 1) >= 3).map((x) => ({ n: x.n, d: x.lbc || 1 }));
   const ladder2 = pool.filter((x) => (x.lbc || 1) === 2).map((x) => ({ n: x.n }));
   const ladder1Count = pool.filter((x) => (x.lbc || 1) === 1).length;
-  let dn = 0;
+  let dn = 0, zbc = null;
   try {
     const dt = await jget("https://push2ex.eastmoney.com/getTopicDTPool?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.ztzt&Pageindex=0&pagesize=400&sort=fund%3Aasc&date=" + ymd);
     dn = ((dt.data && dt.data.pool) || []).length;
   } catch (e) {}
-  return { uplimit: pool.length, dnlimit: dn, ladder3, ladder2, ladder1Count };
+  try {
+    const zb = await jget("https://push2ex.eastmoney.com/getTopicZBPool?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.ztzt&Pageindex=0&pagesize=400&sort=fbt%3Aasc&date=" + ymd);
+    zbc = ((zb.data && zb.data.pool) || []).length;
+  } catch (e) {}
+  const maxLbc = pool.reduce((m, x) => Math.max(m, x.lbc || 1), 0);
+  const zbrate = zbc != null && (pool.length + zbc) > 0 ? round1((zbc / (pool.length + zbc)) * 100) : null;
+  return { uplimit: pool.length, dnlimit: dn, zbc, zbrate, maxLbc, ladder3, ladder2, ladder1Count };
+}
+
+/* 昨日（或最近一个交易日）涨停家数，用于情绪环比 */
+async function fetchPrevUplimit() {
+  for (let d = 1; d <= 4; d++) {
+    try {
+      const ymd = bjDateMinus(d).replace(/-/g, "");
+      const j = await jget("https://push2ex.eastmoney.com/getTopicZTPool?ut=7eea3edcaed734bea9cbfc24409ed989&dpt=wz.ztzt&Pageindex=0&pagesize=400&sort=fbt%3Aasc&date=" + ymd);
+      const n = ((j.data && j.data.pool) || []).length;
+      if (n > 0) return n;
+    } catch (e) { /* 继续往前找 */ }
+  }
+  return null;
+}
+
+/* 量能对比：上证+深成 K 线成交量（腾讯源，手），今日 vs 前 5/10 日均量（%）
+   口径说明：腾讯日 K 无成交额历史，量比按成交量计算，与金额口径方向一致 */
+async function fetchVolRatio() {
+  const today = bjDateMinus(0);
+  const beg = bjDateMinus(30);
+  const volOf = async (code) => {
+    const u = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=" + code + ",day," + beg + "," + today + ",20,qfq";
+    const r = await get(u, { Referer: "https://gu.qq.com/" });
+    const j = JSON.parse(r.data);
+    const node = j.data[Object.keys(j.data)[0]];
+    const arr = node.qfqday || node.day || [];
+    return arr.map((x) => parseFloat(x[5]));
+  };
+  const [v1, v2] = await Promise.all([volOf("sh000001"), volOf("sz399001")]);
+  const n = Math.min(v1.length, v2.length);
+  if (n < 11) return null;
+  const tot = [];
+  for (let i = 0; i < n; i++) tot.push((v1[v1.length - n + i] || 0) + (v2[v2.length - n + i] || 0));
+  const todayV = tot[tot.length - 1];
+  if (!(todayV > 0)) return null;
+  const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const prev5 = avg(tot.slice(-6, -1));
+  const prev10 = avg(tot.slice(-11, -1));
+  if (!(prev5 > 0) || !(prev10 > 0)) return null;
+  return { r5: Math.round((todayV / prev5) * 100), r10: Math.round((todayV / prev10) * 100) };
 }
 
 async function fetchSectors() {
@@ -202,12 +248,27 @@ async function fetchReviewSnapshot(prevReview) {
   const sec = await fetchSectors();
   const main = await fetchMainNet();
   const lhb = await fetchLhb(bj.date);
+  const [prevUp, vr] = await Promise.all([
+    fetchPrevUplimit().catch(() => null),
+    fetchVolRatio().catch(() => null),
+  ]);
   await sleep(300);
+
+  /* 情绪阶段（规则判定）：涨停家数环比 + 炸板率 + 连板高度 */
+  const up = zt.uplimit, zb = zt.zbrate == null ? 20 : zt.zbrate;
+  let stage = "正常";
+  if (up < 20) stage = "冰点";
+  else if (prevUp != null && up < prevUp * 0.7 && zb > 30) stage = "退潮";
+  else if (up >= 60 && zb < 25 && zt.maxLbc >= 5) stage = "高潮";
+  else if (prevUp != null && up > prevUp && zb < 25) stage = "发酵";
+  else if (zb > 35) stage = "分歧";
+  console.log("[review] 涨停 " + up + " 只（昨日 " + (prevUp != null ? prevUp : "?") + "）· 炸板 " + zt.zbc + "（" + zb + "%）· 最高 " + zt.maxLbc + " 板 · 阶段=" + stage);
+  if (vr) console.log("[review] 量能：5日均量 " + vr.r5 + "% · 10日均量 " + vr.r10 + "%（成交量口径）");
 
   const ur = zt.uplimit && idx.red ? round1(idx.red / Math.max(idx.green, 1)) : 0;
   const pctAvg = (idx.sh.pct + idx.sz.pct + idx.cyb.pct) / 3;
   const profile = {
-    sentiment: zt.uplimit >= 60 && ur >= 1.2 ? "情绪高潮（涨停 " + zt.uplimit + " 只）" : zt.uplimit >= 40 ? "情绪偏热（涨停 " + zt.uplimit + " 只）" : "情绪平淡（涨停 " + zt.uplimit + " 只）",
+    sentiment: stage + "（涨停 " + zt.uplimit + " 只" + (zt.zbrate != null ? "，炸板率 " + zt.zbrate + "%" : "") + "）",
     cap: idx.sh.pct >= idx.cyb.pct ? "沪指领涨，大盘强于双创" : "创业板领涨，小盘强于大盘",
     sectorWidth: sec.upRatio >= 60 ? "宽（上涨板块 " + sec.upRatio + "%）" : sec.upRatio >= 40 ? "中（上涨板块 " + sec.upRatio + "%）" : "窄（上涨板块 " + sec.upRatio + "%）",
     stockWidth: ur >= 1.2 ? "普涨（上涨 " + idx.red + " 家，涨跌比 " + ur + "）" : ur < 0.9 ? "分化（上涨 " + idx.red + " 家，涨跌比 " + ur + "）" : "均衡（上涨 " + idx.red + " 家，涨跌比 " + ur + "）",
@@ -228,7 +289,8 @@ async function fetchReviewSnapshot(prevReview) {
   const snap = {
     tradeDate: bj.date,
     breadth: { red: idx.red, green: idx.green, zero: idx.zero, updownRatio: ur, uplimit: zt.uplimit, dnlimit: zt.dnlimit, high10: 0, low10: 0 },
-    trade: { money: idx.money, moneyRatio10d: null, sh: idx.sh, sz: idx.sz, cyb: idx.cyb },
+    trade: { money: idx.money, moneyRatio5d: vr ? vr.r5 : null, moneyRatio10d: vr ? vr.r10 : null, sh: idx.sh, sz: idx.sz, cyb: idx.cyb },
+    zt: { uplimit: zt.uplimit, dnlimit: zt.dnlimit, zbc: zt.zbc, zbrate: zt.zbrate, maxLbc: zt.maxLbc, prevUplimit: prevUp, l1: zt.ladder1Count, l2c: zt.ladder2.length, l3c: zt.ladder3.length, stage },
     profile,
     valuation: val || prev.valuation || {}, macro: mac || prev.macro || {},
     plateFlowTop: sec.plateFlowTop, plateFlowBottom: sec.plateFlowBottom, mainNetIn: main,

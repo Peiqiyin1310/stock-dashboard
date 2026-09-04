@@ -143,10 +143,10 @@ async function fetchOil() {
   const db = JSON.parse(fs.readFileSync(DATA, "utf8"));
   const [fx, oil] = await Promise.all([fetchFx(), fetchOil()]);
 
-  // ⑨ 隔夜美股：取 data.json 内美股指数（构建时已为最近收盘）
+  // ⑨ 隔夜美股：取 data.json 内美股指数（构建时已为最近收盘），带数据日期标签
   const fromCloses = (k) => { const s = db.symbols[k]; if (!s || !s.closes || s.closes.length < 2) return null;
     const price = s.closes[s.closes.length - 1], prev = s.closes[s.closes.length - 2];
-    return { n: s.name, price, prev, pct: +(((price - prev) / prev) * 100).toFixed(2) }; };
+    return { n: s.name, price, prev, pct: +(((price - prev) / prev) * 100).toFixed(2), d: s.dates ? s.dates[s.dates.length - 1] : "" }; };
   const us = ["100.DJI", "100.SPX", "100.IXIC", "100.NDX"].map(fromCloses).filter(Boolean);
   const hk = ["100.HSI", "100.HSTECH"].map(fromCloses).filter(Boolean);
   const goldKeys = Object.keys(db.symbols).filter((k) => db.symbols[k].group && db.symbols[k].group.indexOf("黄金") >= 0);
@@ -162,6 +162,7 @@ async function fetchOil() {
     tradeDate: TRADE_DATE,
     generatedAt: new Date().toISOString(),
     breadth: S.breadth, trade: S.trade, profile: S.profile,
+    zt: S.zt || null,
     valuation: S.valuation, macro: S.macro, fx, oil,
     plateFlowTop: S.plateFlowTop, plateFlowBottom: S.plateFlowBottom, mainNetIn: S.mainNetIn,
     plateTop: S.plateTop, plateBottom: S.plateBottom, conceptTop: S.conceptTop, conceptBottom: S.conceptBottom,

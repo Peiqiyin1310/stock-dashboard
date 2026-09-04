@@ -61,9 +61,14 @@ const QUOTEONLY = [
   { code: "hf_XAG", key: "300.XAG", group: "黄金数据", name: "国际银现·美元现货(XAG/USD)" },
 ];
 
-const END = "2026-08-22";
+// 动态日期窗口：始终拉到北京时间今天（此前硬编码 2026-08-22 导致 K 线永远停在 8/21 的重大 bug）
+function bjToday() {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+const END = bjToday();
 function startDate() {
-  const d = new Date("2026-08-22T00:00:00Z");
+  const d = new Date(END + "T00:00:00Z");
   d.setDate(d.getDate() - 400);
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
