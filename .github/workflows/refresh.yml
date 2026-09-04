@@ -44,6 +44,19 @@ jobs:
           node _build.js
           node _validate.js || echo "[warn] _validate.js 未通过，请检查数据"
 
+      # 旧链接代理走 jsDelivr CDN 取仓库文件，需把最新构建提交回仓库并刷新 CDN 缓存
+      - name: Commit data back
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add stock-dashboard/index.html stock-dashboard/data.json
+          git diff --cached --quiet || (git commit -m "auto: data refresh [skip ci]" && git push)
+
+      - name: Purge jsDelivr CDN cache
+        run: |
+          curl -sf "https://purge.jsdelivr.net/gh/Peiqiyin1310/stock-dashboard@main/stock-dashboard/index.html" || echo "[warn] purge index 失败"
+          curl -sf "https://purge.jsdelivr.net/gh/Peiqiyin1310/stock-dashboard@main/stock-dashboard/data.json" || echo "[warn] purge data.json 失败"
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
