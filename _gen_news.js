@@ -79,7 +79,8 @@ function classifyNews(s) {
 const DAYS = { macro: 7, policy: 7, earn: 15, other: 7 };
 
 function normTitle(t) {
-  return String(t || '').toLowerCase().replace(/[\s，。！？、：；“”‘’（）【】\[\]()!?.,:;'`"·—\-—]+/g, '').slice(0, 36);
+  // 不截断：与页面实时层 normTitle 保持同一口径，否则 36 字符之外有差异的同一条快讯会在"快照 vs 实时"两层重复显示
+  return String(t || '').toLowerCase().replace(/[\s，。！？、：；“”‘’（）【】\[\]()!?.,:;'`"·—\-—]+/g, '');
 }
 function parseTime(ct) {
   if (!ct) return null;

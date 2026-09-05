@@ -77,7 +77,7 @@ const gridIds = [];
 for (const g of ["cn","us","gold","watch"]) {
   if (store["grid-" + g]) { gridAll += store["grid-" + g].innerHTML; gridIds.push(g); }
 }
-const meta = store["meta"] ? store["meta"].textContent : "";
+const meta = store["meta"] ? (store["meta"].innerHTML || store["meta"].textContent) : "";
 const bad = (gridAll.match(/NaN|Infinity|指标计算异常|数据加载失败/g) || []);
 const cards = (gridAll.match(/class="card(\s|")/g) || []).length;
 const ids = (gridAll.match(/id="c-[^"]+"/g) || []);

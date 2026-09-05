@@ -58,7 +58,7 @@
   @keyframes hl{0%,100%{box-shadow:0 0 0 0 transparent}30%{box-shadow:0 0 0 3px var(--accent)}}
   /* ===== 布局：左侧导航 ===== */
   .layout{display:flex;gap:12px;align-items:flex-start;padding:8px 14px 0}
-  .sidebar{width:104px;flex-shrink:0;display:flex;flex-direction:column;gap:6px;position:sticky;top:10px}
+  .sidebar{width:104px;flex-shrink:0;display:flex;flex-direction:column;gap:6px;position:sticky;top:66px}
   .sidebar button{text-align:left;padding:10px 12px;border-radius:11px;border:1px solid var(--line);
     background:var(--panel);color:var(--txt);font-weight:600;font-size:13px;cursor:pointer;position:relative}
   .sidebar button:hover{border-color:var(--accent)}
@@ -392,6 +392,51 @@
   .pull-hint{position:fixed;top:0;left:0;right:0;z-index:95;text-align:center;padding:9px;font-size:12px;font-weight:600;color:var(--accent);
     background:rgba(59,130,246,.14);border-bottom:1px solid rgba(59,130,246,.3);transform:translateY(-100%);transition:transform .22s ease}
   .pull-hint.show{transform:none}
+
+  /* ================= 视觉升级 v3：信号色条 / 涨跌徽章 / sparkline 渐变 / 复盘徽章序号 / 搜索下拉 ================= */
+  /* 1) 卡片顶部信号色条：一眼扫出买卖分布（App 仪表盘惯例） */
+  .card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;
+    background:linear-gradient(90deg,var(--s-hold),rgba(122,138,160,.1));opacity:.9;z-index:1}
+  .card.card-sig-strongbuy::before{background:linear-gradient(90deg,var(--s-strongbuy),rgba(224,46,46,.12))}
+  .card.card-sig-buy::before{background:linear-gradient(90deg,var(--s-buy),rgba(240,89,43,.12))}
+  .card.card-sig-add::before{background:linear-gradient(90deg,var(--s-add),rgba(245,158,11,.12))}
+  .card.card-sig-sell::before{background:linear-gradient(90deg,var(--s-sell),rgba(52,179,126,.12))}
+  .card.card-sig-strongsell::before{background:linear-gradient(90deg,var(--s-strongsell),rgba(0,148,95,.12))}
+  .price{font-size:28px;font-weight:900}
+  /* 2) 涨跌幅胶囊徽章 */
+  .chg{display:inline-flex;align-items:center;gap:2px;padding:1px 9px;border-radius:9px}
+  .chg.up{background:rgba(224,46,46,.12)} .chg.down{background:rgba(0,181,120,.12)}
+  /* 3) 复盘：序号圆徽章 + 表格斑马纹 */
+  .rv-no{min-width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;
+    border-radius:10px;color:#fff;font-size:14px;
+    background:linear-gradient(135deg,#3b82f6,#7c3aed);box-shadow:0 3px 10px -3px rgba(59,130,246,.8)}
+  .rv-tb tbody tr:nth-child(even) td{background:rgba(136,148,166,.05)}
+  body[data-theme="light"] .rv-tb tbody tr:nth-child(even) td{background:rgba(20,40,80,.035)}
+  /* 4) 搜索/自选下拉候选 */
+  .search-wrap{position:relative;display:inline-flex}
+  .search-wrap input{width:168px;padding-left:27px}
+  .search-wrap::before{content:'🔍';position:absolute;left:8px;top:50%;transform:translateY(-50%);font-size:11px;opacity:.6;pointer-events:none;z-index:1}
+  #search-drop{position:absolute;left:0;right:0;top:calc(100% + 5px);z-index:60;background:var(--panel);
+    border:1px solid var(--line);border-radius:11px;box-shadow:var(--shadow);max-height:264px;overflow:auto;display:none}
+  #watch-drop:empty{display:none}
+  #watch-drop{margin-top:2px;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .sd-item{padding:7px 11px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--line);display:flex;gap:6px;align-items:baseline}
+  .sd-item:last-child{border-bottom:none}
+  .sd-item b{font-weight:700}
+  .sd-item:hover{background:rgba(59,130,246,.12)}
+  /* 5) 顶部市场状态灯 */
+  .mkt-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#8894a6;margin-right:5px;vertical-align:0}
+  .mkt-dot.on{background:var(--up);animation:dotPulse 2.2s ease-out infinite}
+  /* 6) 浅色主题对比度修复：事件正文此前硬编码浅灰，浅背景下不可读 */
+  body[data-theme="light"] .ev-body{color:var(--txt)}
+  body[data-theme="light"] .section-title{background:linear-gradient(90deg,var(--txt),#5a6c88);-webkit-background-clip:text;background-clip:text}
+  body[data-theme="light"] .card,.rv-mod,.ev-card,.keylist,.cal-grid,.wrow{border-color:var(--line)}
+  @media(max-width:760px){
+    .card{padding:12px 13px}
+    .price{font-size:25px}
+    .grid{gap:10px}
+    header .search-wrap{display:none}
+  }
 </style>
 </head>
 <body data-theme="dark">
@@ -407,6 +452,7 @@
   <span class="logo">股市观测<span class="dot">·</span>工作台</span>
   <span class="tab-title" id="tab-title">大A / 港股</span>
   <div class="controls">
+    <span class="search-wrap"><input type="text" id="search" placeholder="搜索标的" autocomplete="off"><div id="search-drop"></div></span>
     <span class="h-clock" id="h-clock"></span>
     <button id="refresh">↻ 刷新</button>
     <label style="display:flex;align-items:center;gap:5px;color:var(--sub);font-size:12px">
@@ -596,7 +642,7 @@ function analyze(d){
     let o=0; if(rsi<30)o++; if(rsi>70)o--; if(k>dj&&kPrev<=dPrev)o++; if(k<dj&&kPrev>=dPrev)o--; if(pctB<0.2)o++; if(pctB>0.8)o--;
     if(o>=2) sig='买入'; else if(o<=-2) sig='卖出'; else sig='持有';
   }
-  const chgPct = (closes[p]-closes[p-1])/closes[p-1]*100;
+  const chgPct = closes[p-1] ? (closes[p]-closes[p-1])/closes[p-1]*100 : 0;
   return {price,closes,ma,macd:{dif:difNow,dea:deaNow,hist:hNow},rsi,k,dj,j,pctB,volRatio,score,sig,chgPct,reasons:reasons.slice(0,4)};
 }
 
@@ -751,12 +797,21 @@ function watchAddFromInput(){
 function signalClass(s){return {'强烈买入':'sig-strongbuy','买入':'sig-buy','加仓':'sig-add','超卖反弹':'sig-hold','持有':'sig-hold','卖出':'sig-sell','强烈卖出':'sig-strongsell'}[s]||'sig-hold';}
 function fmt(n,d=2){return n==null||isNaN(n)?'—':n.toFixed(d);}
 function dirSign(v){return v>=0?'▲':'▼';}
-function sparkSVG(closes,w=300,h=44){
+function sparkSVG(closes,w=300,h=44,uid){
   const c=closes.slice(-40);const min=Math.min(...c),max=Math.max(...c),rng=(max-min)||1;
-  const step=w/(c.length-1);
+  const step=c.length>1?w/(c.length-1):w;
   const pts=c.map((v,i)=>`${(i*step).toFixed(1)},${(h-((v-min)/rng)*h).toFixed(1)}`).join(' ');
-  const col=c[c.length-1]>=c[0]?'var(--up)':'var(--down)';
-  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="display:block;width:100%;height:100%"><polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.6"/></svg>`;
+  /* 注意：SVG presentation attribute 不支持 var()，必须用具体色值（红涨绿跌，两种主题均可读） */
+  const col=c[c.length-1]>=c[0]?'#e02e2e':'#00b578';
+  const gid='sg'+(uid?String(uid).replace(/[^a-zA-Z0-9]/g,''):Math.random().toString(36).slice(2,8));
+  const area=c.length>1?`${pts} ${(w).toFixed(1)},${h} 0,${h}`:'';
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="display:block;width:100%;height:100%">
+    <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${col}" stop-opacity=".26"/><stop offset="100%" stop-color="${col}" stop-opacity="0"/>
+    </linearGradient></defs>
+    <polygon points="${area}" fill="url(#${gid})"/>
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
 }
 function scoreBar(t){
   const pct = Math.max(-5,Math.min(5,t));
@@ -776,13 +831,13 @@ function renderCard(key,m,res,tag,displayName,comb,removable){
   const sign=res.chgPct>=0, cls=sign?'up':'down';
   const baseTxt = `${res.sig}（${comb.base>=0?'+':''}${comb.base}）`;
   const adjTxt = `${comb.adj>=0?'+':''}${comb.adj.toFixed(1)}`;
-  return `<div class="card ${removable?'removable':''}" id="c-${key}" data-key="${key}">
+  return `<div class="card card-sig-${signalClass(comb.sig)} ${removable?'removable':''}" id="c-${key}" data-key="${key}">
     <div class="top"><span class="grp">${tag||m.group}</span>
       ${removable?`<button class="rm" data-rm="${key}" title="移出自选">✕</button>`:''}</div>
     <div class="name">${name}<span class="code-tag">${codeOf(key)}</span><span class="live" id="live-${key}">实时</span></div>
     <div class="price ${cls}" id="price-${key}">${fmt(res.price)}</div>
     <div class="chg ${cls}" id="chg-${key}">${dirSign(res.chgPct)} ${Math.abs(res.chgPct).toFixed(2)}% <span style="opacity:.7">${sign?'+':''}${fmt(res.chgPct*res.price/100)}</span></div>
-    <div style="margin:4px 0 2px">${sparkSVG(res.closes)}</div>
+    <div style="margin:4px 0 2px">${sparkSVG(res.closes,300,44,key)}</div>
     <div class="sig-row"><span class="signal ${signalClass(comb.sig)}">${comb.sig}</span>
       <span class="combine" title="技术面：${baseTxt}\n消息面修正：${adjTxt}\n综合分 = 技术 + 消息">综合 ${comb.total>=0?'+':''}${comb.total.toFixed(1)}</span></div>
     ${scoreBar(comb.total)}
@@ -845,7 +900,7 @@ function watchRow(key){
         <span class="wr-sig ${signalClass(comb.sig)}" >${comb.sig}</span></div>
       <div class="wr-price ${cls} num" id="price-${key}">${fmt(res.price)}</div>
       <div class="wr-chg ${cls} num" id="chg-${key}">${dirSign(res.chgPct)} ${Math.abs(res.chgPct).toFixed(2)}%</div>
-      <div class="wr-spark">${sparkSVG(res.closes,76,32)}</div>
+      <div class="wr-spark">${sparkSVG(res.closes,76,32,key)}</div>
       <button class="rm" data-rm="${key}">✕</button></div>`;
   }catch(e){ return `<div class="wrow" data-key="${key}"><div class="wr-main"><span class="wr-name">${m.name}</span></div><span class="err">计算异常</span></div>`; }
 }
@@ -944,7 +999,7 @@ function renderAll(){
   renderSummary(counts);
   const snap=DB.updated?fmtTime(DB.updated):'未知';
   const meta=document.getElementById('meta');
-  if(meta) meta.textContent=`${marketState()} · 数据快照 ${snap} · ${ok}/${total} 成功 · 数据源：${DB.source||'腾讯财经+天天基金'}`;
+  if(meta) meta.innerHTML=`<span class="mkt-dot ${marketState()==='交易中'?'on':''}"></span>${marketState()} · 数据快照 ${snap} · ${ok}/${total} 成功 · 数据源：${DB.source||'腾讯财经+天天基金'}`;
   loadLive();
 }
 /* 自选页：列表/卡片视图（返回统计供 meta 使用） */
@@ -978,6 +1033,7 @@ function renderWatch(){
     </div>
     ${body}`;
   wrap.querySelectorAll('.wview button').forEach(b=>b.onclick=()=>{ state.watchView=b.dataset.v; renderWatch(); });
+  // ✕ 移出自选由 .tab-panel 的事件委托统一处理（此前按钮 onclick 与委托双重触发，renderAll 会跑两遍）
   const wi=document.getElementById('watch-add-input');
   if(wi){
     wi.oninput=()=>{
@@ -989,7 +1045,6 @@ function renderWatch(){
     };
     wi.onkeydown=e=>{ if(e.key==='Enter') watchAddFromInput(); };
   }
-  wrap.querySelectorAll('button[data-rm]').forEach(b=>b.onclick=()=>removeWatch(b.dataset.rm));
   // 信号筛选应用到自选
   if(state.filterSig){
     wrap.querySelectorAll('.wrow').forEach(r=>{ const s=r.querySelector('.wr-sig'); if(s && s.textContent!==state.filterSig) r.style.opacity=.15; });
@@ -1038,7 +1093,7 @@ function renderReview(){
     const body=rvTable(['指标','数值','解读'],[
       ['涨 / 跌 / 平',`${b.red} / ${b.green} / ${b.zero}`,`涨跌比 ${ur} · ${ur<1?'空方略占优':'多方占优'}`],
       ['涨停 / 跌停 / 炸板',`${ul} / ${b.dnlimit} / ${zbcTxt}`,(z.stage||'')?`情绪${z.stage}（涨停 ${ul} 只）`:'涨停 '+ul+' 只'],
-      ['成交额',`${(t.money/10000).toFixed(2)} 万亿`,volTxt],
+      ['成交额',t.money!=null?`${(t.money/10000).toFixed(2)} 万亿`:'（待补）',volTxt],
       ['上证 / 深成 / 创业板',`${t.sh.close} / ${t.sz.close} / ${t.cyb.close}`,`${rvPct(t.sh.pct)} ${rvPct(t.sz.pct)} ${rvPct(t.cyb.pct)}`],
     ])+rvNote('一句话：'+verdict);
     M.push(rvMod('②','今日概览',body));
@@ -1069,26 +1124,6 @@ function renderReview(){
     M.push(rvMod('③','涨停复盘 · 涨停梯队',body));
   }
 
-  /* ③ 资金面（加仓/减仓由当日板块资金流直接生成） */
-  {
-    const ft=top(R.plateFlowTop,3), fb=top(R.plateFlowBottom,3);
-    const flowT=(ft.length||fb.length)
-      ? rvTable(['主力加仓板块','亿元','主力减仓板块','亿元'],
-        [0,1,2].map(i=>[cell(ft[i]&&ft[i].n),ft[i]?`+${ft[i].v}`:'—',cell(fb[i]&&fb[i].n),fb[i]?`${fb[i].v}`:'—']))
-      : '<div class="nodata">今日无板块资金数据</div>';
-    let extra='';
-    const mn=top(R.mainNetIn,10);
-    if(mn.length) extra+=`<div class="section-title" style="margin-top:10px">个股主力净流入</div>`
-      +rvTable(['标的','亿元'],mn.map(x=>[x.n,`+${x.v}`]));
-    const ib=top(R.lhbInstBuy,5), is=top(R.lhbInstSell,5);
-    if(ib.length||is.length) extra+=`<div class="section-title" style="margin-top:10px">龙虎榜 · 机构</div>`
-      +rvTable(['净买入','亿元','净卖出','亿元'],
-        [0,1,2,3,4].map(i=>[cell(ib[i]&&ib[i].n),ib[i]?`+${ib[i].v}`:'—',cell(is[i]&&is[i].n),is[i]?`${is[i].v}`:'—']));
-    const note=(ft.length||fb.length)
-      ? `主力加仓 ${ft.map(x=>x.n).join('、')||'—'}；减仓 ${fb.map(x=>x.n).join('、')||'—'}。` : '';
-    M.push(rvMod('③','资金面',flowT+extra+(note?rvNote(note):'')));
-  }
-
   /* ④ 主线与支线（结论由当日板块涨跌生成） */
   {
     const pt=top(R.plateTop,6), pb=top(R.plateBottom,5), ct=top(R.conceptTop,5);
@@ -1104,12 +1139,32 @@ function renderReview(){
     M.push(rvMod('④','主线与支线',main+con+weak+(note?rvNote(note):'')));
   }
 
-  /* ⑤ 宏观面 */
+  /* ⑤ 资金面（加仓/减仓由当日板块资金流直接生成） */
   {
-    const v=R.valuation||{},mc=R.macro||{},fx=R.fx||{},oil=R.oil;
+    const ft=top(R.plateFlowTop,3), fb=top(R.plateFlowBottom,3);
+    const flowT=(ft.length||fb.length)
+      ? rvTable(['主力加仓板块','亿元','主力减仓板块','亿元'],
+        [0,1,2].map(i=>[cell(ft[i]&&ft[i].n),ft[i]?`+${ft[i].v}`:'—',cell(fb[i]&&fb[i].n),fb[i]?`${fb[i].v}`:'—']))
+      : '<div class="nodata">今日无板块资金数据</div>';
+    let extra='';
+    const mn=top(R.mainNetIn,10);
+    if(mn.length) extra+=`<div class="section-title" style="margin-top:10px">个股主力净流入</div>`
+      +rvTable(['标的','亿元'],mn.map(x=>[x.n,`+${x.v}`]));
+    const ib=top(R.lhbInstBuy,5), is=top(R.lhbInstSell,5);
+    if(ib.length||is.length) extra+=`<div class="section-title" style="margin-top:10px">龙虎榜 · 净买入/净卖出</div>`
+      +rvTable(['净买入','亿元','净卖出','亿元'],
+        [0,1,2,3,4].map(i=>[cell(ib[i]&&ib[i].n),ib[i]?`+${ib[i].v}`:'—',cell(is[i]&&is[i].n),is[i]?`${is[i].v}`:'—']));
+    const note=(ft.length||fb.length)
+      ? `主力加仓 ${ft.map(x=>x.n).join('、')||'—'}；减仓 ${fb.map(x=>x.n).join('、')||'—'}。` : '';
+    M.push(rvMod('⑤','资金面',flowT+extra+(note?rvNote(note):'')));
+  }
+
+  /* ⑥ 宏观面 */
+  {
+    const v=R.valuation||{},mc=R.macro||{},fx=R.fx||{},oil=R.oil,t6=R.trade||{};
     const rows=[];
-    const mr10v=R.trade&&R.trade.moneyRatio10d;
-    rows.push(['成交额',`${(R.trade.money/10000).toFixed(2)} 万亿${mr10v!=null?`（10日均 ${mr10v}%）`:''}`,
+    const mr10v=t6.moneyRatio10d;
+    rows.push(['成交额',t6.money!=null?`${(t6.money/10000).toFixed(2)} 万亿${mr10v!=null?`（10日均 ${mr10v}%）`:''}`:'—',
       mr10v!=null?(mr10v<90?'缩量，反弹动能有限':'量能充沛'):'成交额（均量比待补）']);
     if(v.pe) rows.push(['中证全指 PE',`${v.pe} 倍 · 10年分位 ${v.pePct10y}%`,
       v.pePct10y>80?'估值偏高，需业绩兑现':'估值中性']);
@@ -1117,11 +1172,11 @@ function renderReview(){
     if(fx.cnh) rows.push(['美元/人民币',`在岸 ${fx.cny||'—'} · 离岸 ${fx.cnh}`,
       fx.cnh>fx.cny?'离岸略弱，贬值压力温和':'汇率预期稳定']);
     if(oil&&oil.price) rows.push(['NYMEX原油',`${oil.price} 美元/桶`,'输入性通胀压力可控']);
-    M.push(rvMod('⑤','宏观面',rvTable(['指标','数值','判断'],rows),
+    M.push(rvMod('⑥','宏观面',rvTable(['指标','数值','判断'],rows),
       `<span class="rv-tag">中债 ${cell(mc.date,'—')} · 估值 ${cell(v.date,'—')}</span>`));
   }
 
-  /* ⑥ 隔夜外围（美股 · 港股 · 黄金，带数据日期） */
+  /* ⑦ 隔夜外围（美股 · 港股 · 黄金，带数据日期） */
   {
     const us=A(R.us), hk=A(R.hk), gd=A(R.gold);
     const rows=[...us,...hk,...gd].map(x=>[x.n,`<span class="num">${typeof x.price==='number'?x.price.toLocaleString():cell(x.price)}</span>`,rvPct(x.pct),cell(x.d,'—')]);
@@ -1130,8 +1185,9 @@ function renderReview(){
     const impact=ndx&&dji?(ndx.pct<0&&dji.pct>0
       ?`科技承压、价值走强（道指 ${dji.pct>0?'+':''}${dji.pct}% vs 纳指100 ${ndx.pct}%）：高位科技线或受压制，留意高低切换。`
       :`美股整体${ndx.pct>=0?'走强':'走弱'}，对A股风险偏好${ndx.pct>=0?'有带动':'形成压制'}。`):'美股数据待补。';
-    const stale=rows.some(r=>{const m=String(r[3]).match(/2026-0(\d)-(\d+)/);return m&&+(m[1])===8&&+(m[2])<25;});
-    M.push(rvMod('⑥','隔夜外围（美股·港股·黄金）',body+rvNote('影响：'+impact+(stale?' ⚠️ 检测到历史日期，数据源可能受限。':'')), '<span class="rv-tag">美股为最近收盘（隔夜），港股/A股时段为当日</span>'));
+    /* 数据陈旧检测：数据日期早于 7 天前即提示（旧版正则硬编码 2026-0X，10 月后失效） */
+    const stale=rows.some(r=>{const d=String(r[3]);return /^\d{4}-\d{2}-\d{2}$/.test(d)&&d<inDays(-7);});
+    M.push(rvMod('⑦','隔夜外围（美股·港股·黄金）',body+rvNote('影响：'+impact+(stale?' ⚠️ 检测到超过 7 天的历史日期，数据源可能受限。':'')), '<span class="rv-tag">美股为最近收盘（隔夜），港股/A股时段为当日</span>'));
   }
 
   /* ⑦ 主升形态（按当日个股资金流筛选，不预设股票池） */
@@ -1251,7 +1307,7 @@ function applyLive(keymap){
     const t=new Date().toLocaleTimeString('zh-CN',{hour12:false});
     const meta=document.getElementById('meta');
     // 只显示最新一次刷新时间（替换而非追加，避免"实时报价已更新"越积越多）
-    if(meta) meta.textContent=meta.textContent.split(' · 实时报价已更新')[0]+' · 实时报价已更新 '+t;
+    if(meta) meta.innerHTML=meta.innerHTML.split(' · 实时报价已更新')[0]+' · 实时报价已更新 '+t;
   }
 }
 function applyCachedQuotes(){
@@ -1320,9 +1376,9 @@ function openDetail(key){
     drawDetailKline();
   }
   const ov=document.getElementById('drawer-overlay');
-  if(ov) ov.style.display='flex';
+  if(ov){ ov.style.display='flex'; document.body.style.overflow='hidden'; }   // 锁背景滚动
 }
-function closeDetail(){ const ov=document.getElementById('drawer-overlay'); if(ov) ov.style.display='none'; dKey=null; }
+function closeDetail(){ const ov=document.getElementById('drawer-overlay'); if(ov){ ov.style.display='none'; document.body.style.overflow=''; } dKey=null; }
 function aggKline(key,type){
   const m=DB.symbols[key];
   if(!m||!m.closes||!m.closes.length) return null;
@@ -1679,7 +1735,6 @@ function renderNews(){
   // 主消息列表改为由 renderNewsItems() 渲染到 #news-items（支持实时层 LIVE 增量刷新，避免重建整个面板丢失表单输入）
 
   const pinCount=pinnedList.length;
-  const today=new Date().toISOString().slice(0,10);
   const swanActive=allNews.some(m=>!m.deleted&&isActive(m)&&m.level==='L1'&&m.dir==='强利空'&&m.assets.includes('全市场'));
   /* —— 月历式日历：今天 ±14 ~ +29 天（覆盖未来一个多月的关键节点），有关键事件的日期带红点，点日期/清单看放大卡片 —— */
   const calAll=buildCalAuto().filter(c=>!CAL_HIDE[c.id]).concat(CAL.map(c=>({id:c.id,date:c.date,name:c.name,tag:'自定义',est:false,detail:'自定义事件，请自行跟踪进展。'})));

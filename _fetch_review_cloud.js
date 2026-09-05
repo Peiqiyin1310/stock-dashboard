@@ -208,15 +208,16 @@ async function fetchVolRatio() {
 async function fetchSectors() {
   const F = "f2,f3,f12,f14,f62,f184";
   // 行业：取全量（约90+个），按涨跌幅取前6/后6；按主力净流入取前6/后6
-  const up = await jgetAny("/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!50&ut=" + UT + "&fields=" + F);
+  // pz 必须 >= 板块总数，否则"走弱板块"取到的是涨幅倒数截断位而非真正垫底
+  const up = await jgetAny("/api/qt/clist/get?pn=1&pz=120&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!50&ut=" + UT + "&fields=" + F);
   const rows = ((up.data && up.data.diff) || []).filter((x) => x.f14);
   const plateTop = rows.slice(0, 6).map((x) => ({ n: x.f14, v: round1(x.f3), lead: x.f184 || "" }));
   const plateBottom = rows.slice(-6).reverse().map((x) => ({ n: x.f14, v: round1(x.f3), lead: x.f184 || "" }));
   const flowRows = rows.slice().sort((a, b) => (b.f62 || 0) - (a.f62 || 0));
   const plateFlowTop = flowRows.slice(0, 6).map((x) => ({ n: x.f14, v: yi(x.f62) }));
   const plateFlowBottom = flowRows.slice(-6).reverse().map((x) => ({ n: x.f14, v: yi(x.f62) }));
-  // 概念：取全量，前5/后3
-  const con = await jgetAny("/api/qt/clist/get?pn=1&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:3+f:!50&ut=" + UT + "&fields=" + F);
+  // 概念：取全量（400+ 个，pz 必须 > 总数），前5/后3
+  const con = await jgetAny("/api/qt/clist/get?pn=1&pz=600&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:3+f:!50&ut=" + UT + "&fields=" + F);
   const crows = ((con.data && con.data.diff) || []).filter((x) => x.f14);
   const conceptTop = crows.slice(0, 5).map((x) => ({ n: x.f14, v: round1(x.f3), lead: x.f184 || "" }));
   const conceptBottom = crows.slice(-3).reverse().map((x) => ({ n: x.f14, v: round1(x.f3), lead: x.f184 || "" }));

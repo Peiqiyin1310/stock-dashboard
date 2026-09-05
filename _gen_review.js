@@ -131,8 +131,8 @@ async function fetchOil() {
     const t = await get("https://qt.gtimg.cn/q=hf_CL", true);
     const m = t.match(/v_hf_CL="([^"]*)"/);
     if (!m) return null;
-    const f = m[1].split("~");
-    // 腾讯外盘期货：f[0]最新价? 实际格式：名称~代码~最新~... 取可用的价格与涨跌
+    // 腾讯外盘品种(hf_)是逗号分隔：f[0]=最新价、f[7]=昨收（与 _gen.js fetchQuote / 页面 applyLive 同口径）
+    const f = m[1].split(",");
     const price = parseFloat(f[0]) || parseFloat(f[7]);
     return price > 0 ? { price, raw: m[1].slice(0, 80) } : null;
   } catch (e) { return null; }

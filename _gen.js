@@ -68,11 +68,12 @@ function bjToday() {
 }
 const END = bjToday();
 function startDate() {
+  // 统一用 UTC 方法：入口是 UTC 午夜时刻，混用本地 setDate/getMonth 在非 UTC 时区 runner 上会偏移一天
   const d = new Date(END + "T00:00:00Z");
-  d.setDate(d.getDate() - 400);
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
+  d.setUTCDate(d.getUTCDate() - 400);
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${m}-${day}`;
 }
 function get(url, headers) {
   return new Promise((res, rej) => {
