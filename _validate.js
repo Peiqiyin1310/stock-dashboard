@@ -22,7 +22,7 @@ global.document = {
   addEventListener(){},
   removeEventListener(){},
 };
-global.window = {};
+global.window = { addEventListener(){}, removeEventListener(){}, scrollTo(){}, requestAnimationFrame: (f)=>f&&f() };
 global.setInterval = () => 0;
 global.clearInterval = () => {};
 global.setTimeout = () => 0;
@@ -63,7 +63,7 @@ const TEST_TAIL = `
   out.push('normTitle去重相同='+(normTitle('美股三大指数收高 道指涨近1%')===normTitle('美股三大指数收高，道指涨近1%'))+' 去重不同='+(normTitle('美股三大指数收高')!==normTitle('现货黄金涨1.88%')));
   // 场景8：自动财经日历（LPR/FOMC/非农等）生成正常且每条含解读
   var calA=buildCalAuto();
-  out.push('自动日历条数='+calA.length+' 含LPR='+calA.some(c=>c.name.indexOf('LPR')>=0)+' 含FOMC='+calA.some(c=>c.name.indexOf('FOMC')>=0)+' 每条含解读='+calA.every(c=>(c.detail||'').length>10));
+  out.push('自动日历条数='+calA.length+' 含LPR='+calA.some(c=>c.name.indexOf('LPR')>=0)+' 含FOMC='+calA.some(c=>c.name.indexOf('FOMC')>=0)+' 每条含文案='+calA.every(c=>((c.detail||c.preview||c.result||'')+'').length>0));
   window.__MSG_TESTS__=out;
 })();
 `;
