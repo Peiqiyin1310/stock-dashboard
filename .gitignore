@@ -9,6 +9,6 @@ probe.txt
 review_snapshot.json.bak
 review_snapshot.cloud.json
 
-# 旧链接代理服务（仅 WorkBuddy 沙箱发布用，不属于 GitHub Pages 项目）
-stock-dashboard/server.js
+# 旧链接代理服务的运行时产物（server.js 已纳入版本控制：它此前只存在于本地磁盘，
+# 沙箱一重启就退回旧版，导致"修好了又复发"。放在仓库内才能随 git 一起部署）
 stock-dashboard/last_good.html

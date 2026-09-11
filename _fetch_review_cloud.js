@@ -178,6 +178,17 @@ async function fetchPrevUplimit() {
   return null;
 }
 
+/* 最近一个交易日（腾讯上证日K最后一根日期），用于节假日防护。
+   交易日接口在节假日同样返回空涨停池，若无此校验会写出"涨停 0 只 · 情绪冰点"的假复盘。 */
+async function lastTradeDay() {
+  const u = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000001,day,,,5,qfq";
+  const r = await get(u, { Referer: "https://gu.qq.com/" });
+  const j = JSON.parse(r.data);
+  const node = j.data && j.data.sh000001;
+  const arr = (node && (node.qfqday || node.day)) || [];
+  return arr.length ? String(arr[arr.length - 1][0]).slice(0, 10) : null;
+}
+
 /* 量能对比：上证+深成 K 线成交量（腾讯源，手），今日 vs 前 5/10 日均量（%）
    口径说明：腾讯日 K 无成交额历史，量比按成交量计算，与金额口径方向一致 */
 async function fetchVolRatio() {
@@ -227,7 +238,9 @@ async function fetchSectors() {
 
 async function fetchMainNet() {
   try {
-    const j = await jget("https://push2delay.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&fltt=2&invt=2&fid=f62&fs=m:0+t:6&ut=" + UT + "&fields=f12,f14,f62");
+    // 全 A 口径：深主板(m:0+t:6) + 创业板(m:0+t:80) + 沪主板(m:1+t:2) + 科创板(m:1+t:23)
+    // 此前只有 m:0+t:6（仅深市主板，total 1641 vs 全 A 5558），创业板/科创板/沪市龙头被整段漏掉
+    const j = await jget("https://push2delay.eastmoney.com/api/qt/clist/get?pn=1&pz=10&po=1&np=1&fltt=2&invt=2&fid=f62&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23&ut=" + UT + "&fields=f12,f14,f62");
     return ((j.data && j.data.diff) || []).map((x) => ({ n: x.f14, v: yi(x.f62) }));
   } catch (e) { return []; }
 }
@@ -246,6 +259,17 @@ async function fetchReviewSnapshot(prevReview) {
   const bj = bjNow();
   const idx = await fetchIndex();
   const zt = await fetchZtDt(bj.ymd);
+  /* 非交易日防护：工作日节假日（国庆等）涨停池同样为空，若不校验会写出
+     "涨停 0 只 · 情绪冰点"的假复盘。只在池为空时才用日K二次确认，
+     避免正常交易日被 K 线更新滞后误伤（有涨停就一定是交易日）。 */
+  if (zt.uplimit === 0) {
+    const lastDay = await lastTradeDay().catch(() => null);
+    if (lastDay && lastDay !== bj.date) {
+      const err = new Error("非交易日（最近交易日 " + lastDay + "，今日无日K）");
+      err.nonTradingDay = true;
+      throw err;
+    }
+  }
   const sec = await fetchSectors();
   const main = await fetchMainNet();
   const lhb = await fetchLhb(bj.date);

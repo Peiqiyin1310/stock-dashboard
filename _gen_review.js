@@ -85,7 +85,10 @@ async function ensureSnapshot() {
       const oldDb = JSON.parse(fs.readFileSync(DATA, "utf8"));
       snapshotUsed = await cloud.fetchReviewSnapshot(oldDb.review);
       console.log("[review] 东财公开接口抓取当日盘后数据 tradeDate=" + snapshotUsed.tradeDate);
-    } catch (e) { console.log("[review] 云端抓取失败，保持旧快照:", e.message); }
+    } catch (e) {
+      if (e.nonTradingDay) console.log("[review] 今日非交易日，跳过复盘更新（" + e.message + "），保留上一交易日复盘");
+      else console.log("[review] 云端抓取失败，保持旧快照:", e.message);
+    }
   }
   if (snapshotUsed) {
     TRADE_DATE = snapshotUsed.tradeDate;
@@ -121,7 +124,8 @@ async function fetchFx() {
     const t = await get("https://hq.sinajs.cn/list=fx_susdcny,fx_susdcnh", true);
     const rows = {};
     for (const m of t.matchAll(/var hq_str_(fx_\w+)="([^"]*)"/g)) {
-      const f = m[2].split(","); rows[m[1]] = { price: parseFloat(f[1]), name: f[9] || m[1] };
+      // 与 _gen.js fetchFx 统一口径：f[8]=最新价（f[1]=买价仅作回退），此前取 f[1] 使复盘页与行情页出现两个不同汇率
+      const f = m[2].split(","); rows[m[1]] = { price: parseFloat(f[8]) || parseFloat(f[1]), name: f[9] || m[1] };
     }
     return { cny: rows.fx_susdcny ? rows.fx_susdcny.price : null, cnh: rows.fx_susdcnh ? rows.fx_susdcnh.price : null };
   } catch (e) { return { cny: null, cnh: null }; }

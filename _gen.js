@@ -123,7 +123,13 @@ async function fetchNav(code) {
   if (!m) throw new Error("no nav trend");
   const arr = JSON.parse(m[1]);
   if (!arr.length) throw new Error("empty nav");
-  let pts = arr.map(p => ({ t: new Date(p.x).toISOString().slice(0, 10), v: num(p.y) })).filter(p => p.v > 0);
+  // 时间戳是 UTC 毫秒，净值日按北京时间计：直接用 toISOString() 会把日期写成前一天
+  // （例：北京 2023-03-17 → 2023-03-16，K线日期整体偏移一天）
+  const bjDay = (ms) => {
+    const d = new Date(ms + 8 * 3600 * 1000);
+    return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0");
+  };
+  let pts = arr.map(p => ({ t: bjDay(p.x), v: num(p.y) })).filter(p => p.v > 0);
   if (pts.length > 130) pts = pts.slice(-130);
   return {
     closes: pts.map(p => p.v),
@@ -165,7 +171,9 @@ async function fetchFx() {
     const m = txt.match(new RegExp(`hq_str_${code}="([^"]*)"`));
     if (!m) throw new Error("no fx " + code);
     const f = m[1].split(",");
-    const price = parseFloat(f[3]) || parseFloat(f[1]);
+    // 新浪外汇字段（2026-09-11 实测）：f[8]=最新价、f[3]=昨收、f[1]=买价。
+    // 此前误取 f[3]（昨收），导致页面汇率停在昨日收盘价。回退链保留，源变更时仍可用。
+    const price = parseFloat(f[8]) || parseFloat(f[1]) || parseFloat(f[3]);
     if (!(price > 0)) throw new Error("bad fx price");
     out[key] = { name, price, time: f[0], date: f[f.length - 1] || "" };
   }
@@ -173,6 +181,22 @@ async function fetchFx() {
 }
 
 (async () => {
+  // 旧数据先读入：单个标的抓取失败时沿用上一次成功的数据，
+  // 避免一次网络抖动就把该标的整段 K 线历史抹成 noData（此前行为）
+  const DATA = require("path").join(__dirname, "stock-dashboard", "data.json");
+  let prevDb = {};
+  try { prevDb = JSON.parse(fs.readFileSync(DATA, "utf8")); } catch (e) {}
+  const prevOf = (key) => (prevDb && prevDb.symbols && prevDb.symbols[key]) || null;
+  const keepPrev = (key, fallback) => {
+    const old = prevOf(key);
+    if (old && old.closes && old.closes.length) {
+      const kept = Object.assign({}, old, { stale: true });
+      console.log(`     ↳ 沿用上次数据（${kept.dates ? kept.dates[kept.dates.length - 1] : "?"}）`);
+      return kept;
+    }
+    return fallback;
+  };
+
   const symbols = {};
   let ok = 0;
   for (const s of SYMS) {
@@ -183,7 +207,7 @@ async function fetchFx() {
       console.log(`OK  ${s.key} (${s.name}) bars=${d.bars} last=${d.closes[d.closes.length - 1]}`);
     } catch (e) {
       console.log(`FAIL ${s.key} (${s.name}): ${e.message}`);
-      symbols[s.key] = { group: s.group, name: s.name, noData: true };
+      symbols[s.key] = keepPrev(s.key, { group: s.group, name: s.name, noData: true });
     }
   }
   for (const f of FUNDS) {
@@ -194,7 +218,7 @@ async function fetchFx() {
       console.log(`OK  ${f.key} (${f.name}) nav=${d.bars} last=${d.closes[d.closes.length - 1]}`);
     } catch (e) {
       console.log(`FAIL ${f.key} (${f.name}): ${e.message}`);
-      symbols[f.key] = { group: f.group, name: f.name, noData: true };
+      symbols[f.key] = keepPrev(f.key, { group: f.group, name: f.name, noData: true });
     }
   }
   for (const q of QUOTEONLY) {
@@ -203,8 +227,12 @@ async function fetchFx() {
       symbols[q.key] = { group: q.group, name: q.name, quoteOnly: true, price: d.price, prev: d.prev, src: "tencent" };
       console.log(`QO  ${q.key} (${q.name}) price=${d.price}`);
     } catch (e) {
-      symbols[q.key] = { group: q.group, name: q.name, quoteOnly: true, price: null, src: "tencent" };
-      console.log(`QO  ${q.key} (${q.name}) price=null (${e.message})`);
+      const old = prevOf(q.key);
+      const kept = old && old.price != null
+        ? Object.assign({}, old, { stale: true })
+        : { group: q.group, name: q.name, quoteOnly: true, price: null, src: "tencent" };
+      symbols[q.key] = kept;
+      console.log(`QO  ${q.key} (${q.name}) price=${kept.price} (${e.message})${kept.stale ? " 沿用上次" : ""}`);
     }
   }
   // 美元人民币汇率（每日复盘·外汇）
@@ -212,10 +240,12 @@ async function fetchFx() {
   try {
     fx = await fetchFx();
     console.log(`FX  USD/CNY 在岸 ${fx.usdcny.price} / 离岸 ${fx.usdcnh.price} (${fx.usdcny.date})`);
-  } catch (e) { console.log(`FX  fail: ${e.message}`); }
+  } catch (e) {
+    console.log(`FX  fail: ${e.message}`);
+    fx = prevDb.fx || null;   // 失败沿用上次汇率，不写 null 覆盖
+  }
   // 合并写入：保留 news / newsUpdated / review / calendar 等其它生成器写入的字段，
   // 只更新行情相关字段（updated / source / symbols / fx），避免覆盖快讯 / 复盘 / 日历数据。
-  const DATA = require("path").join(__dirname, "stock-dashboard", "data.json");
   let db = {};
   try { db = JSON.parse(fs.readFileSync(DATA, "utf8")); } catch (e) {}
   db.updated = new Date().toISOString();

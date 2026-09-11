@@ -50,11 +50,14 @@ const TEST_TAIL = `
   // 场景4：L3 传闻不计分
   out.push('L3传闻计分 score='+msgScore({level:'L3',dir:'利空'}));
   // 场景5：突发自动置顶判定 + 手动置顶/取消置顶
-  var autoMsg={id:'x1',auto:true,level:'L1',dir:'强利空',assets:['全市场']};
-  var normalMsg={id:'x2',auto:true,level:'L2',dir:'利多',assets:['大A']};
+  var autoMsg={id:'x1',time:'2026-08-21 10:00',auto:true,level:'L1',dir:'强利空',assets:['全市场']};
+  var normalMsg={id:'x2',time:'2026-08-21 10:05',auto:true,level:'L2',dir:'利多',assets:['大A']};
   out.push('L1强利空全市场自动置顶='+isAutoFlash(autoMsg)+' L2不自动='+isAutoFlash(normalMsg));
-  unpinAuto('x1');
+  /* 取消置顶统一走 togglePin（页面唯一入口）；需先入 NEWS，与真实页面一致 */
+  NEWS.push(autoMsg); NEWS.push(normalMsg);
+  togglePin('x1');
   out.push('取消自动置顶后='+(!isPinned(autoMsg))+' 手动置顶L2='+(togglePin('x2'),isPinned(normalMsg))+' 取消手动='+(togglePin('x2'),!isPinned(normalMsg)));
+  NEWS.pop(); NEWS.pop();
   // 场景6：快照消息时间解析（YYYY-MM-DD HH:mm）
   var t=parseMsgTime({time:'2026-08-21 23:25'});
   out.push('时间解析='+(t instanceof Date && !isNaN(t))+' 当日消息活跃='+isActive({time:'2026-08-21 10:00'}));
@@ -67,6 +70,29 @@ const TEST_TAIL = `
   window.__MSG_TESTS__=out;
 })();
 `;
+
+/* ===== 静态契约检查（专治"错了不报错、死了不被发现"的静默失败）=====
+   1) DOM 契约：脚本中以字面量调用的 getElementById('x')，其 id 必须在初始 HTML 中存在
+      （仅查纯字面量，动态拼接如 `price-${key}` 不会命中，避免误报）
+   2) 死函数：顶层 function 定义若全脚本只出现一次（只有定义、无人调用）则报出
+      —— 顶栏搜索框 setupSearch() 曾长期是死的，而此前校验轮轮 PASS */
+const contractIssues = [];
+const DYNAMIC_IDS = new Set([
+  // 由 JS 写入 innerHTML 后再取用的 id，静态 HTML 中不存在，属正常
+]);
+{
+  const htmlIds = new Set();
+  { const re = /id="([^"]+)"/g; let m; while ((m = re.exec(html))) htmlIds.add(m[1]); }
+  const getRe = /getElementById\(\s*["']([A-Za-z0-9_-]+)["']\s*\)/g;
+  const missing = new Set();
+  let m2;
+  while ((m2 = getRe.exec(script))) if (!htmlIds.has(m2[1]) && !DYNAMIC_IDS.has(m2[1])) missing.add(m2[1]);
+  if (missing.size) contractIssues.push("DOM 契约破裂：getElementById 引用了初始 HTML 中不存在的 id → " + [...missing].join(", ") + "（改 id 后漏改脚本？）");
+
+  const fnNames = [...new Set([...script.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/gm)].map((x) => x[1]))];
+  const dead = fnNames.filter((n) => (script.match(new RegExp("\\b" + n + "\\b", "g")) || []).length <= 1);
+  if (dead.length) contractIssues.push("死函数（已定义但全脚本无调用）→ " + dead.join(", "));
+}
 
 let threw = null;
 try { eval(script + TEST_TAIL); } catch (e) { threw = e; }
@@ -90,5 +116,9 @@ console.log("card divs:", cards);
 console.log("card ids:", ids.join(", "));
 console.log("review panel:", reviewOK ? "OK (10模块)" : "MISSING/不完整 (mod="+modCount+")");
 console.log("bad tokens (NaN/Infinity/异常):", bad.length ? bad : "NONE");
-console.log(bad.length ? "FAIL" : "PASS");
+console.log("contract:", contractIssues.length ? contractIssues.join(" | ") : "OK");
+// 退出码即闸门：CI 不再用 `|| echo` 吞掉失败——校验不过就不部署（宁停更，不部署坏产物）
+const failed = bad.length > 0 || contractIssues.length > 0;
+console.log(failed ? "FAIL" : "PASS");
 console.log("MSG-TESTS:", (global.window.__MSG_TESTS__ || []).join(" | "));
+process.exit(failed ? 1 : 0);

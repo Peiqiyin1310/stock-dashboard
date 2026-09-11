@@ -98,9 +98,6 @@
   .sig-strongsell{background:rgba(0,148,95,.16);color:var(--s-strongsell);border:1px solid var(--s-strongsell)}
   .combine{font-size:11px;color:var(--sub);cursor:help;flex:1;min-width:0}
   .combine b{color:var(--txt)}
-  .scorebar{position:relative;height:4px;border-radius:2px;background:linear-gradient(90deg,var(--s-strongsell) 0%,var(--s-sell) 30%,var(--s-hold) 50%,var(--s-buy) 70%,var(--s-strongbuy) 100%);
-    margin:3px 0 7px;opacity:.9}
-  .scorebar i{position:absolute;top:-2px;width:2px;height:8px;background:var(--txt);border-radius:1px;transform:translateX(-1px)}
   .conflict{border:1px solid var(--warn);color:var(--warn);background:rgba(240,136,62,.1);
     font-size:11px;text-align:center;padding:4px 8px;border-radius:8px;margin:6px 0}
   .spark{width:100%;height:44px;display:block;margin:2px 0 6px;cursor:zoom-in}
@@ -521,7 +518,6 @@
   .sig-sell{background:rgba(47,168,122,.1);color:var(--s-sell);border:1px solid rgba(47,168,122,.28)}
   .sig-strongsell{background:rgba(14,203,129,.12);color:var(--down);border:1px solid rgba(14,203,129,.32)}
   .combine{font-size:11px;color:var(--sub)}
-  .scorebar{display:none}                      /* 记分条信息与「综合分」文字重复，去掉 */
   .sig-row{margin:9px 0 6px;gap:8px}
   .reason{font-size:11px;color:var(--sub);white-space:normal;display:-webkit-box;-webkit-line-clamp:2;
     -webkit-box-orient:vertical;overflow:hidden;line-height:1.55;min-height:0;margin-bottom:0}
@@ -942,7 +938,6 @@ function savePinned(){ try{ localStorage.setItem('wbd_pinned_v1', JSON.stringify
 function isAutoFlash(m){ return !!m.auto && m.level==='L1' && (m.dir==='强利多'||m.dir==='强利空'||(m.assets||[]).includes('全市场')); }
 function isPinned(m){ return !!(PINNED[m.id] || (isAutoFlash(m) && !UNAUTO[m.id])); }
 /* togglePin 的规范定义见下方（避免重复声明造成歧义） */
-function unpinAuto(id){ UNAUTO[id]=true; if(PINNED[id]) delete PINNED[id]; savePinned(); renderNews(); }
 /* 一键取消全部置顶：手动置顶全清 + 所有自动突发置顶一并解除（记入 UNAUTO，避免"取消了又被自动顶回"） */
 function unpinAll(){
   NEWS.concat(LIVE).forEach(m=>{ if(isAutoFlash(m) && !UNAUTO[m.id]) UNAUTO[m.id]=true; if(PINNED[m.id]) delete PINNED[m.id]; });
@@ -1033,11 +1028,6 @@ function sparkSVG(closes,w=300,h=44,uid){
     <polygon points="${area}" fill="url(#${gid})"/>
     <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
   </svg>`;
-}
-function scoreBar(t){
-  const pct = Math.max(-5,Math.min(5,t));
-  const pos = ((pct+5)/10*100).toFixed(1);
-  return `<div class="scorebar" title="综合分 ${t>=0?'+':''}${t.toFixed(1)} / 区间 -5~+5"><i style="left:${pos}%"></i></div>`;
 }
 function msgLines(key,msgs){
   if(!msgs||!msgs.length) return '';
@@ -1438,10 +1428,15 @@ function renderReview(){
       .filter(r=>cell(r[1],'')!=='');
     const ur=b.updownRatio!=null?b.updownRatio:'—', ul=b.uplimit!=null?b.uplimit:'—';
     const stage=z.stage||'';
+    const zbTxt=z.zbrate!=null?z.zbrate:'—';
+    // 后端规则会输出 冰点/分歧/发酵/高潮/退潮/正常 六种；此前只接了四种，
+    // "正常/分歧"会掉到兜底文案显示成"情绪平淡"，与②模块的"情绪正常"自相矛盾
     const cycle = stage==='高潮'?`情绪高潮（涨停 ${ul} 只、涨跌比 ${ur}）：主线可持有，跟风股防退潮。`
       :stage==='发酵'?`情绪发酵（涨停 ${ul} 只、环比抬升）：观察首板能否晋级，聚焦主线龙头。`
-      :stage==='退潮'?`情绪退潮（涨停缩量、炸板率 ${z.zbrate!=null?z.zbrate:'—'}%）：降低预期，等情绪冰点后的修复。`
+      :stage==='退潮'?`情绪退潮（涨停缩量、炸板率 ${zbTxt}%）：降低预期，等情绪冰点后的修复。`
       :stage==='冰点'?`情绪冰点（涨停仅 ${ul} 只）：机会在超跌反弹，等待放量确认。`
+      :stage==='分歧'?`情绪分歧（涨停 ${ul} 只、炸板率 ${zbTxt}%）：多空拉锯，只做最强主线，回避中位跟风股。`
+      :stage==='正常'?`情绪正常（涨停 ${ul} 只、涨跌比 ${ur}）：轮动格局，按主线节奏参与，不追高。`
       :(ul>=60&&ur>=1.2)?`情绪高潮（涨停 ${ul} 只、涨跌比 ${ur}）：主线可持有，跟风股防退潮。`
       :(ul>=40)?`情绪偏热但分化（涨停 ${ul} 只、涨跌比 ${ur}）：只做主线龙头，回避中位跟风。`
       :`情绪平淡（涨停 ${ul} 只、涨跌比 ${ur}）：控制仓位，等量能恢复。`;
@@ -1925,7 +1920,7 @@ function renderNewsItems(){
   if(f.asset) list=list.filter(m=>(m.assets||[]).includes(f.asset));
   if(f.hideL3) list=list.filter(m=>m.level!=='L3');
   const eff=m=>isActive(m);
-  const timeSort=(a,b)=>b.time.localeCompare(a.time);
+  const timeSort=(a,b)=>String(b.time||'').localeCompare(String(a.time||''));   // 容忍缺 time 的消息（数据源可能不给）
   const pinnedList=list.filter(m=>isPinned(m)).sort(timeSort);
   const normalList=list.filter(m=>!isPinned(m)).sort(timeSort);
   const MAXSHOW=20;   // 只显示最新 20 条（置顶优先，不占名额）
@@ -1965,7 +1960,7 @@ function renderNews(){
   if(f.asset) list=list.filter(m=>(m.assets||[]).includes(f.asset));
   if(f.hideL3) list=list.filter(m=>m.level!=='L3');
   const eff = m=>isActive(m);
-  const timeSort=(a,b)=>b.time.localeCompare(a.time);
+  const timeSort=(a,b)=>String(b.time||'').localeCompare(String(a.time||''));   // 容忍缺 time 的消息（数据源可能不给）
   const pinnedList=list.filter(m=>isPinned(m)).sort(timeSort);
   const normalList=list.filter(m=>!isPinned(m)).sort(timeSort);
   // 主消息列表改为由 renderNewsItems() 渲染到 #news-items（支持实时层 LIVE 增量刷新，避免重建整个面板丢失表单输入）
@@ -2242,7 +2237,7 @@ function startNewsLive(){
   try{ const t=localStorage.getItem('wbd_theme_v1'); if(t==='light'||t==='dark') document.body.dataset.theme=t; }catch(e){}
   try{ const c=localStorage.getItem('wbd_tab_v1'); if(c && TABS.some(x=>x.id===c)) state.cur=c; }catch(e){}
 })();
-loadNews(); loadPinned(); loadCal(); loadWatch(); renderAll(); setupAuto(); switchTab(state.cur); applyCachedQuotes();
+loadNews(); loadPinned(); loadCal(); loadWatch(); renderAll(); setupAuto(); setupSearch(); switchTab(state.cur); applyCachedQuotes();
 startNewsLive();
 /* 启动页：内容渲染完成后淡出并移除 */
 setTimeout(()=>{

@@ -39,26 +39,35 @@ jobs:
           node _gen_calendar.js || echo "[warn] _gen_calendar.js 失败"
           node _gen_review.js || echo "[warn] _gen_review.js 失败（将沿用已有复盘）"
 
+      # 闸门：校验不过就不部署（此前是 `node _validate.js || echo`，失败照常上线，护栏形同虚设）
       - name: Build & validate
         run: |
           node _build.js
-          node _validate.js || echo "[warn] _validate.js 未通过，请检查数据"
+          node _validate.js
 
-      # 旧链接代理走 jsDelivr CDN 取仓库文件，需把最新构建提交回仓库并刷新 CDN 缓存
+      # 旧链接代理走 jsDelivr CDN 取仓库文件，需把最新构建提交回仓库并刷新 CDN 缓存。
+      # 注意：此前只 add index.html/data.json，漏了 news.json/calendar.json，
+      # 导致 jsDelivr 上这两个快照长期陈旧（9/1 vs data.json 9/11）；
+      # 且前端"签名不同即整体替换"会把陈旧的日历覆盖回页面，必须一并提交。
       - name: Commit data back
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add stock-dashboard/index.html stock-dashboard/data.json
+          git add stock-dashboard/index.html stock-dashboard/*.json
           git diff --cached --quiet || (git commit -m "auto: data refresh [skip ci]" && git push)
 
       - name: Purge jsDelivr CDN cache
         run: |
-          curl -sf "https://purge.jsdelivr.net/gh/Peiqiyin1310/stock-dashboard@main/stock-dashboard/index.html" || echo "[warn] purge index 失败"
-          curl -sf "https://purge.jsdelivr.net/gh/Peiqiyin1310/stock-dashboard@main/stock-dashboard/data.json" || echo "[warn] purge data.json 失败"
+          for f in index.html data.json news.json calendar.json; do
+            curl -sf "https://purge.jsdelivr.net/gh/Peiqiyin1310/stock-dashboard@main/stock-dashboard/$f" || echo "[warn] purge $f 失败"
+          done
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
+
+      # 只发布运行产物：剔除模板/校验脚本/代理源码（此前 /_template.html、/_check.js 均可被公开下载）
+      - name: Clean non-artifact sources
+        run: rm -f stock-dashboard/_template.html stock-dashboard/_check.js stock-dashboard/server.js
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
