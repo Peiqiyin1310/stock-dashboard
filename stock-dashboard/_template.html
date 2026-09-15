@@ -1349,14 +1349,14 @@ function renderReview(){
   /* ④ 主线与支线（结论由当日板块涨跌生成） */
   {
     const pt=top(R.plateTop,6), pb=top(R.plateBottom,5), ct=top(R.conceptTop,5);
-    const main=pt.length?rvTable(['领涨板块','涨幅','龙头'],pt.map(x=>[x.n,rvPct(x.v),cell(x.lead,'—')]))
+    const main=pt.length?rvTable(['领涨板块','涨幅','龙头股'],pt.map(x=>[x.n,rvPct(x.v),cell(x.lead,'—')]))
       :'<div class="nodata">今日无板块数据</div>';
     const con=ct.length?`<div class="section-title" style="margin-top:10px">概念风口</div>`
-      +rvTable(['概念','涨幅','领涨'],ct.map(x=>[x.n,rvPct(x.v),cell(x.lead,'—')])):'';
+      +rvTable(['概念','涨幅','龙头股'],ct.map(x=>[x.n,rvPct(x.v),cell(x.lead,'—')])):'';
     const weak=pb.length?`<div class="section-title" style="margin-top:10px">走弱方向</div>`
       +rvTable(['板块','跌幅'],pb.map(x=>[x.n,rvPct(x.v)])):'';
     const L=pt[0];
-    const note=L?`今日最强：${L.n} ${rvPct(L.v)}${L.lead?'，'+L.lead+' 领涨':''}。`
+    const note=L?`今日最强：${L.n} ${rvPct(L.v)}${L.lead?`（龙头 ${L.lead}）`:''}。`
       +`${pb[0]?`最弱：${pb[0].n} ${rvPct(pb[0].v)}。`:''}`:'';
     M.push(rvMod('④','主线与支线',main+con+weak+(note?rvNote(note):'')));
   }
