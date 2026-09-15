@@ -216,23 +216,63 @@ async function fetchVolRatio() {
   return { r5: Math.round((todayV / prev5) * 100), r10: Math.round((todayV / prev10) * 100) };
 }
 
+/* 板块宽度：接口 pz 硬上限 100 条（调大无效），必须分页拉全量再统计。
+   此前用「涨幅前20 + 垫底12」的样本算占比，实测 62.5% vs 真实 7.5%，方向完全反了
+   （2026-09-15 大跌日被判成"板块宽度宽"）。 */
+async function fetchSectorBreadth(fs) {
+  const out = [];
+  for (let pn = 1; pn <= 8; pn++) {
+    const j = await jgetAny("/api/qt/clist/get?pn=" + pn + "&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3&fs=" + fs + "&ut=" + UT + "&fields=f3,f14");
+    const rows = ((j.data && j.data.diff) || []).filter((x) => x.f14 && x.f3 != null);
+    if (!rows.length) break;
+    out.push(...rows);
+    if (rows.length < 100) break;
+  }
+  return out;
+}
+
 async function fetchSectors() {
-  const F = "f2,f3,f12,f14,f62,f184";
-  // 行业：取全量（约90+个），按涨跌幅取前6/后6；按主力净流入取前6/后6
-  // pz 必须 >= 板块总数，否则"走弱板块"取到的是涨幅倒数截断位而非真正垫底
-  const up = await jgetAny("/api/qt/clist/get?pn=1&pz=120&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!50&ut=" + UT + "&fields=" + F);
-  const rows = ((up.data && up.data.diff) || []).filter((x) => x.f14);
-  const plateTop = rows.slice(0, 6).map((x) => ({ n: x.f14, v: round1(x.f3), lead: x.f184 || "" }));
-  const plateBottom = rows.slice(-6).reverse().map((x) => ({ n: x.f14, v: round1(x.f3), lead: x.f184 || "" }));
-  const flowRows = rows.slice().sort((a, b) => (b.f62 || 0) - (a.f62 || 0));
-  const plateFlowTop = flowRows.slice(0, 6).map((x) => ({ n: x.f14, v: yi(x.f62) }));
-  const plateFlowBottom = flowRows.slice(-6).reverse().map((x) => ({ n: x.f14, v: yi(x.f62) }));
-  // 概念：取全量（400+ 个，pz 必须 > 总数），前5/后3
-  const con = await jgetAny("/api/qt/clist/get?pn=1&pz=600&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:3+f:!50&ut=" + UT + "&fields=" + F);
-  const crows = ((con.data && con.data.diff) || []).filter((x) => x.f14);
-  const conceptTop = crows.slice(0, 5).map((x) => ({ n: x.f14, v: round1(x.f3), lead: x.f184 || "" }));
-  const conceptBottom = crows.slice(-3).reverse().map((x) => ({ n: x.f14, v: round1(x.f3), lead: x.f184 || "" }));
-  const upRatio = rows.length ? round1(rows.filter((x) => x.f3 > 0).length / rows.length * 100) : 0;
+  // 字段说明（2026-09-15 实测校正）：
+  //   f184 = 板块内领涨股的「涨幅%」（数值，不是股票名！）
+  //   f128 = 板块内领涨股的「股票名称」  ← 龙头要取这个
+  // 接口对 pz 有硬上限 100 条（实测 pz=120/600/1000 均只返回 100），所以「垫底/净流出」榜
+  // 必须用 po=0 反向排序从头部取，不能靠 pz 调大后 slice(-N)（那取到的是第 100 名）。
+  const F = "f2,f3,f12,f14,f62,f128";
+  const mk = (x, withLead) => {
+    const o = { n: x.f14, v: round1(x.f3) };
+    if (withLead && x.f128) o.lead = x.f128;
+    return o;
+  };
+  const q = (fs, fid, po, pz) => "/api/qt/clist/get?pn=1&pz=" + pz + "&po=" + po + "&np=1&fltt=2&invt=2&fid=" + fid + "&fs=" + fs + "&ut=" + UT + "&fields=" + F;
+  const IND = "m:90+t:2+f:!50", CON = "m:90+t:3+f:!50";
+
+  // 行业/概念：涨跌幅榜（po=1 降序取头部=领涨；po=0 升序取头部=垫底）
+  const [indUp, indDown, conUp, conDown, allInd] = await Promise.all([
+    jgetAny(q(IND, "f3", 1, 20)),
+    jgetAny(q(IND, "f3", 0, 12)),
+    jgetAny(q(CON, "f3", 1, 20)),
+    jgetAny(q(CON, "f3", 0, 12)),
+    fetchSectorBreadth(IND).catch(() => []),
+  ]);
+  const rowsOf = (j) => ((j.data && j.data.diff) || []).filter((x) => x.f14);
+  const iUp = rowsOf(indUp), iDn = rowsOf(indDown), cUp = rowsOf(conUp), cDn = rowsOf(conDown);
+
+  const plateTop = iUp.slice(0, 6).map((x) => mk(x, true));
+  const plateBottom = iDn.slice(0, 6).map((x) => mk(x, false));
+
+  // 资金榜：同样用 po 反向排序取两端
+  const [indIn, indOut] = await Promise.all([
+    jgetAny(q(IND, "f62", 1, 12)),
+    jgetAny(q(IND, "f62", 0, 12)),
+  ]);
+  const plateFlowTop = rowsOf(indIn).slice(0, 6).map((x) => ({ n: x.f14, v: yi(x.f62) }));
+  const plateFlowBottom = rowsOf(indOut).slice(0, 6).map((x) => ({ n: x.f14, v: yi(x.f62) }));
+
+  const conceptTop = cUp.slice(0, 5).map((x) => mk(x, true));
+  const conceptBottom = cDn.slice(0, 3).map((x) => mk(x, false));
+
+  // 板块宽度：全量口径（分页拉全 496 个行业）
+  const upRatio = allInd.length ? round1((allInd.filter((x) => x.f3 > 0).length / allInd.length) * 100) : null;
   return { plateTop, plateBottom, plateFlowTop, plateFlowBottom, conceptTop, conceptBottom, upRatio };
 }
 
