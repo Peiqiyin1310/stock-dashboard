@@ -22,6 +22,19 @@ function get(url, extraHeaders) {
     req.on("error", (e) => rej(e));
   });
 }
+async function getBuf(url, extraHeaders) {
+  return new Promise((res, rej) => {
+    const headers = Object.assign(
+      { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", Referer: "https://quote.eastmoney.com/" },
+      extraHeaders || {}
+    );
+    const req = https.get(url, { timeout: 20000, headers }, (r) => {
+      const ch = []; r.on("data", (c) => ch.push(c)); r.on("end", () => res({ status: r.statusCode, buf: Buffer.concat(ch) }));
+    });
+    req.on("timeout", () => { req.destroy(); rej(new Error("timeout")); });
+    req.on("error", (e) => rej(e));
+  });
+}
 async function jget(url, tries = 3, extraHeaders) {
   let last;
   for (let i = 0; i < tries; i++) {
@@ -128,21 +141,113 @@ function bjNow() {
   };
 }
 
-async function fetchIndex() {
-  const j = await jgetAny("/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&ut=" + UT + "&fields=f2,f3,f4,f6,f12,f104,f105,f106");
+/* ===== 指数与涨跌家数：双源互为兜底，绝不因单一接口抖动让整轮复盘作废 =====
+   背景（2026-09-24 核查）：原实现只走东财 push2 `ulist.np/get`，且**没有 try/catch**。
+   该接口在 GitHub Actions 的出口 IP 上多数轮次返回 http 502（本机同一路径实测 63ms 正常返回，
+   说明是间歇性/IP 侧问题，接口并未下线）。一抛错就让整个 fetchReviewSnapshot 作废、
+   静默沿用上一轮复盘——页面上完全看不出来，是上一轮"看起来在更新其实没更新"的根因。
+   现在：指数行情优先腾讯 qt.gtimg.cn（_gen.js 已在 CI 长期验证可达），东财只作兜底；
+   涨跌家数优先东财 f104/105/106，失败则用 clist 全量二分统计兜底；两路都失败时字段为 null，
+   由调用方降级成「暂缺 / 待补」文案（前端已是空值安全），而不是把 null 拼进字符串或整轮作废。 */
+async function fetchIndexTencent() {
+  const r = await getBuf("https://qt.gtimg.cn/q=sh000001,sz399001,sz399006", { Referer: "https://gu.qq.com/" });
+  if (r.status !== 200) throw new Error("http " + r.status);
+  const txt = new TextDecoder("gbk").decode(r.buf);   // 腾讯返回 GBK，与 _gen.js 外汇同源用法
+  const out = {};
+  let moneyWan = 0;
+  for (const [k, code] of [["sh", "sh000001"], ["sz", "sz399001"], ["cyb", "sz399006"]]) {
+    const m = txt.match(new RegExp('v_' + code + '="([^"]*)"'));
+    if (!m) continue;
+    const f = m[1].split("~");
+    const close = parseFloat(f[3]), pct = parseFloat(f[32]);
+    if (!isFinite(close) || !isFinite(pct)) continue;
+    out[k] = { close: round2(close), pct: round2(pct) };
+    /* 成交额只累加 sh + sz：创业板指(399006) 的成交额是深市的**子集**，
+       三个一起加会多算一份（实测 16533.57 亿被算成 20652.98 亿）。
+       东财 f6 口径（沪指+深证成指）也是 16533.57 亿，两源互为交叉验证。 */
+    if (k === "sh" || k === "sz") {
+      const amt = parseFloat(f[37]);      // f37 = 成交额（万元）
+      if (isFinite(amt)) moneyWan += amt;
+    }
+  }
+  if (!out.sh || !out.sz || !out.cyb) throw new Error("腾讯指数不完整(" + Object.keys(out).join(",") + ")");
+  out.money = moneyWan > 0 ? round2(moneyWan / 10000) : null;   // 万元 → 亿元（与东财 f6 口径一致）
+  return out;
+}
+async function fetchIndexEM() {
+  const j = await jgetAny("/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&ut=" + UT + "&fields=f2,f3,f6,f12");
   const rows = (j.data && j.data.diff) || [];
-  const getIdx = (code) => rows.find((x) => x.f12 === code);
-  const sh = getIdx("000001"), sz = getIdx("399001"), cyb = getIdx("399006");
+  const g = (c) => rows.find((x) => x.f12 === c);
+  const sh = g("000001"), sz = g("399001"), cyb = g("399006");
   if (!sh || !sz || !cyb) throw new Error("index data missing");
   return {
-    sh: { close: sh.f2, pct: sh.f3 },
-    sz: { close: sz.f2, pct: sz.f3 },
-    cyb: { close: cyb.f2, pct: cyb.f3 },
-    money: yi((sh.f6 || 0) + (sz.f6 || 0)),      // 两市成交额（亿）
-    red: (sh.f104 || 0) + (sz.f104 || 0),          // 上涨家数（沪+深）
-    green: (sh.f105 || 0) + (sz.f105 || 0),
-    zero: (sh.f106 || 0) + (sz.f106 || 0),
+    sh: { close: sh.f2, pct: sh.f3 }, sz: { close: sz.f2, pct: sz.f3 }, cyb: { close: cyb.f2, pct: cyb.f3 },
+    money: yi((sh.f6 || 0) + (sz.f6 || 0)),
   };
+}
+/* 涨跌家数 A 路：指数上的 f104/105/106（沪+深两市全口径，1 次请求） */
+async function fetchBreadthEM() {
+  const j = await jgetAny("/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001&ut=" + UT + "&fields=f12,f104,f105,f106");
+  const rows = (j.data && j.data.diff) || [];
+  let red = 0, green = 0, zero = 0;
+  for (const x of rows) { red += (+x.f104 || 0); green += (+x.f105 || 0); zero += (+x.f106 || 0); }
+  if (red + green + zero <= 0) throw new Error("f104-106 全为 0");
+  return { red, green, zero };
+}
+/* 涨跌家数 B 路（兜底）：clist 全 A 按涨幅降序 → 二分定位 0% 分界 → 推算涨/平/跌家数。
+   只依赖 clist/get（CI 侧稳定），代价约 10 次请求；合计不等于 total 时差额归入下跌（多为停牌/无涨跌幅）。 */
+async function fetchBreadthClist() {
+  const FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23";
+  const page = async (pn) => {
+    // 每次翻页之间留间隔：东财对连续请求会断连（实测密集请求出现 socket hang up）
+    if (pn > 1) await sleep(180);
+    const j = await jgetAny("/api/qt/clist/get?pn=" + pn + "&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3&fs=" + FS + "&ut=" + UT + "&fields=f3,f12");
+    const d = j.data || {};
+    return { total: d.total || 0, rows: (d.diff || []).filter((x) => x && x.f12 != null) };
+  };
+  const p1 = await page(1);
+  if (!p1.total) throw new Error("clist total 缺失");
+  const pages = Math.ceil(p1.total / 100);
+  let lo = 1, hi = pages, boundary = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const r = mid === 1 ? p1 : await page(mid);
+    if (!r.rows.length) { hi = mid - 1; continue; }
+    if (+r.rows[r.rows.length - 1].f3 > 0) lo = mid + 1;   // 该页末行仍为正 ⇒ 分界在后面
+    else { boundary = mid; hi = mid - 1; }
+  }
+  if (!boundary) throw new Error("未找到涨幅 0% 分界页");
+  const bRows = boundary === 1 ? p1.rows : (await page(boundary)).rows;
+  let red = (boundary - 1) * 100, zero = 0;
+  bRows.forEach((r) => { const v = +r.f3; if (v > 0) red++; else if (v === 0) zero++; });
+  let stillZero = zero > 0;                                // 平盘可能跨页，向后补扫至多 3 页
+  for (let pn = boundary + 1; stillZero && pn <= Math.min(pages, boundary + 3); pn++) {
+    const r = await page(pn);
+    let z = 0;
+    r.rows.forEach((x) => { if (+x.f3 === 0) z++; });
+    zero += z; stillZero = z > 0;
+  }
+  const green = Math.max(0, p1.total - red - zero);
+  if (red + green + zero <= 0) throw new Error("clist 统计为空");
+  return { red, green, zero };
+}
+async function fetchIndex() {
+  const idx = await fetchIndexTencent().catch(async (e) => {
+    console.log("[review] 腾讯指数失败（" + e.message + "），退回东财 ulist");
+    return await fetchIndexEM();
+  });
+  let br = null;
+  try { br = await fetchBreadthEM(); }
+  catch (e) {
+    console.log("[review] 东财涨跌家数失败（" + e.message + "），改用 clist 全量统计");
+    br = await fetchBreadthClist().catch((e2) => {
+      console.log("[review] 涨跌家数两路均失败，该字段降级为暂缺：" + e2.message);
+      return null;
+    });
+  }
+  return Object.assign({}, idx, {
+    red: br ? br.red : null, green: br ? br.green : null, zero: br ? br.zero : null, breadthOk: !!br,
+  });
 }
 
 async function fetchZtDt(ymd) {
@@ -323,9 +428,21 @@ async function fetchReviewSnapshot(prevReview) {
       throw err;
     }
   }
-  const sec = await fetchSectors();
-  const main = await fetchMainNet();
-  const lhb = await fetchLhb(bj.date);
+  /* 板块 / 资金 / 龙虎榜属于**增补模块**：任一失败只让对应模块留空（前端各模块本就有
+     "待补" 兜底），不该把整个复盘作废。核心必填的是涨停池 zt 与指数 idx——
+     它们拿不到就说明当日盘面数据整体不可用，交给上层沿用旧复盘并打「陈旧」标记。 */
+  const sec = await fetchSectors().catch((e) => {
+    console.log("[review] 板块数据抓取失败，该模块留空：" + e.message);
+    return { plateTop: [], plateBottom: [], plateFlowTop: [], plateFlowBottom: [], conceptTop: [], conceptBottom: [], upRatio: null };
+  });
+  const main = await fetchMainNet().catch((e) => {
+    console.log("[review] 主力净流入榜抓取失败，该模块留空：" + e.message);
+    return [];
+  });
+  const lhb = await fetchLhb(bj.date).catch((e) => {
+    console.log("[review] 龙虎榜抓取失败，该模块留空：" + e.message);
+    return { lhbInstBuy: [], lhbInstSell: [] };
+  });
   const [prevUp, vr] = await Promise.all([
     fetchPrevUplimit().catch(() => null),
     fetchVolRatio().catch(() => null),
@@ -343,19 +460,23 @@ async function fetchReviewSnapshot(prevReview) {
   console.log("[review] 涨停 " + up + " 只（昨日 " + (prevUp != null ? prevUp : "?") + "）· 炸板 " + zt.zbc + "（" + zb + "%）· 最高 " + zt.maxLbc + " 板 · 阶段=" + stage);
   if (vr) console.log("[review] 量能：5日均量 " + vr.r5 + "% · 10日均量 " + vr.r10 + "%（成交量口径）");
 
-  const ur = zt.uplimit && idx.red ? round1(idx.red / Math.max(idx.green, 1)) : 0;
+  // 涨跌家数可能两路都失败 → ur 为 null，文案降级，绝不拼 null 进字符串
+  const ur = (zt.uplimit && idx.red != null && idx.green != null) ? round1(idx.red / Math.max(idx.green, 1)) : null;
   const pctAvg = (idx.sh.pct + idx.sz.pct + idx.cyb.pct) / 3;
   // 板块宽度文案：upRatio 可能为 null（全量分页没抓到），此时给中性兜底文案，
   // 绝不把 null 拼进字符串（此前会渲染成"窄（上涨板块 null%）"并连过 9 天校验）
   const swText = sec.upRatio == null
     ? "暂缺（行业全量未取到）"
     : (sec.upRatio >= 60 ? "宽" : sec.upRatio >= 40 ? "中" : "窄") + "（上涨板块 " + sec.upRatio + "%）";
+  const swStock = ur == null
+    ? "暂缺（涨跌家数未取到）"
+    : (ur >= 1.2 ? "普涨" : ur < 0.9 ? "分化" : "均衡") + "（上涨 " + idx.red + " 家，涨跌比 " + ur + "）";
   const profile = {
     sentiment: stage + "（涨停 " + zt.uplimit + " 只" + (zt.zbrate != null ? "，炸板率 " + zt.zbrate + "%" : "") + "）",
     cap: idx.sh.pct >= idx.cyb.pct ? "沪指领涨，大盘强于双创" : "创业板领涨，小盘强于大盘",
     sectorWidth: swText,
-    stockWidth: ur >= 1.2 ? "普涨（上涨 " + idx.red + " 家，涨跌比 " + ur + "）" : ur < 0.9 ? "分化（上涨 " + idx.red + " 家，涨跌比 " + ur + "）" : "均衡（上涨 " + idx.red + " 家，涨跌比 " + ur + "）",
-    volume: "成交 " + (idx.money / 10000).toFixed(2) + " 万亿",
+    stockWidth: swStock,
+    volume: idx.money != null ? "成交 " + (idx.money / 10000).toFixed(2) + " 万亿" : "暂缺（成交额未取到）",
     trendShort: pctAvg > 0.3 ? "上行" : pctAvg < -0.3 ? "回调" : "震荡",
     trendLong: "—",
   };
@@ -387,4 +508,5 @@ async function fetchReviewSnapshot(prevReview) {
   return snap;
 }
 
-module.exports = { fetchReviewSnapshot, bjNow };
+/* 导出抓取层的可单测入口：换源/兜底逻辑必须能被单独验证（CI 里出问题时能一眼定位是哪一路挂了） */
+module.exports = { fetchReviewSnapshot, bjNow, fetchIndex, fetchIndexTencent, fetchIndexEM, fetchBreadthEM, fetchBreadthClist };
