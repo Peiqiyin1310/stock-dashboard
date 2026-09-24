@@ -93,7 +93,10 @@ async function fetchValuation() {
   return {
     pe,
     pePct3y: pctIn(3), pePct5y: pctIn(5), pePct10y: pctIn(10),
-    pb: null, div: null,                                     // 中证接口无 PB/股息率，页面不展示
+    /* 不再输出 pb / div：2026-09-24 实测中证 index-perf 的字段只有
+       tradeDate/indexCode/indexName*/open/high/low/close/change/changePct/tradingVol/tradingValue/consNumber/peg
+       —— 没有市净率与股息率；前端也从未渲染过这两个字段（一直是恒为 null 的死字段，容易被误读成"待补"）。
+       真要上证股息率需另找数据源（中证红利 000922 的息率在另一个项目里按月维护）。 */
     date: lastDay.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3"),
     src: "中证指数官网",
   };
