@@ -49,11 +49,14 @@ jobs:
       # 注意：此前只 add index.html/data.json，漏了 news.json/calendar.json，
       # 导致 jsDelivr 上这两个快照长期陈旧（9/1 vs data.json 9/11）；
       # 且前端"签名不同即整体替换"会把陈旧的日历覆盖回页面，必须一并提交。
+      # 2026-09-24：补上根目录 review_snapshot.json —— 它是"当日复盘已抓取"的缓存，
+      # 此前从不入库，导致每个交易日 15:05 之后的每一轮（每 ~20 分钟）都重新抓一遍全量复盘，
+      # 既浪费又加重东财限流（并发抢连接 → socket hang up → 板块宽度整段丢失）。
       - name: Commit data back
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add stock-dashboard/index.html stock-dashboard/*.json
+          git add stock-dashboard/index.html stock-dashboard/*.json review_snapshot.json
           git diff --cached --quiet || (git commit -m "auto: data refresh [skip ci]" && git push)
 
       - name: Purge jsDelivr CDN cache
