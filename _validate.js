@@ -64,9 +64,24 @@ const TEST_TAIL = `
   NEWS.pop(); NEWS.pop();
   // 场景7：多源标题去重（"重复的不要更新"）
   out.push('normTitle去重相同='+(normTitle('美股三大指数收高 道指涨近1%')===normTitle('美股三大指数收高，道指涨近1%'))+' 去重不同='+(normTitle('美股三大指数收高')!==normTitle('现货黄金涨1.88%')));
-  // 场景8：自动财经日历（LPR/FOMC/非农等）生成正常且每条含解读
+  // 场景8：财经日历条目结构 + 未来性硬断言
+  /* 2026-09-24：日历从「硬编码宏观事件 + 快讯回填」改成「东财真实除权除息排期」。
+     本场景此前只 push 进 out（信息性），现在同时写 __MSG_FAIL__ 参与闸门——
+     否则日历空掉/全挤在同一天/把过去日期当未来事件，都会静默上线。 */
   var calA=buildCalAuto();
-  out.push('自动日历条数='+calA.length+' 含LPR='+calA.some(c=>c.name.indexOf('LPR')>=0)+' 含FOMC='+calA.some(c=>c.name.indexOf('FOMC')>=0)+' 每条含文案='+calA.every(c=>((c.detail||c.preview||c.result||'')+'').length>0));
+  var calBad=[];
+  calA.forEach(function(c){
+    if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(c.date||'')) calBad.push(c.id+':日期非法('+c.date+')');
+    if((c.date||'')<TODAY_STR) calBad.push(c.id+':事件日期在过去');
+    if(!c.key) calBad.push(c.id+':key=false 会被渲染成自定义事件（带删除按钮）');
+    if(c.tag==='分红'&&!/每 10 股派/.test(c.preview||'')) calBad.push(c.id+':分红条目缺派息额');
+  });
+  if(calA.length>6){
+    var uniqDay={}; calA.forEach(function(c){uniqDay[c.date]=1;});
+    if(Object.keys(uniqDay).length<=1) calBad.push('日历 '+calA.length+' 条全部落在同一天（每日名额分摊失效）');
+  }
+  window.__MSG_FAIL__=calBad;
+  out.push('自动日历条数='+calA.length+' 覆盖天数='+Object.keys(calA.reduce(function(a,c){a[c.date]=1;return a;},{})).length+' 含LPR='+calA.some(c=>c.name.indexOf('LPR')>=0)+' 含FOMC='+calA.some(c=>c.name.indexOf('FOMC')>=0)+' 每条含文案='+calA.every(c=>((c.detail||c.preview||c.result||'')+'').length>0)+' 硬断言失败='+calBad.length+(calBad.length?' → '+calBad.slice(0,3).join(' | '):''));
   window.__MSG_TESTS__=out;
 })();
 `;
@@ -137,8 +152,11 @@ console.log("bad tokens (NaN/Infinity/异常):", bad.length ? bad : "NONE");
 console.log("数值泄漏 (null/undefined/NaN):", leaks.length ? leaks : "NONE");
 console.log("contract:", contractIssues.length ? contractIssues.join(" | ") : "OK");
 /* 退出码即闸门：CI 不再用 `|| echo` 吞掉失败——校验不过就不部署（宁停更，不部署坏产物）
-   2026-09-24：此前 reviewOK 只打印、不参与判定，复盘面板坏掉照常上线。现一并纳入闸门。 */
-const failed = bad.length > 0 || contractIssues.length > 0 || leaks.length > 0 || !reviewOK;
+   2026-09-24：此前 reviewOK 只打印、不参与判定，复盘面板坏掉照常上线。现一并纳入闸门。
+   2026-09-24 补充：页面内单元测试（TEST_TAIL）里的日历硬断言也改为进闸门（__MSG_FAIL__）。 */
+const msgFail = global.window.__MSG_FAIL__ || [];
+const failed = bad.length > 0 || contractIssues.length > 0 || leaks.length > 0 || !reviewOK || msgFail.length > 0;
+console.log("日历硬断言:", msgFail.length ? msgFail.join(" | ") : "PASS");
 console.log(failed ? "FAIL" : "PASS");
 console.log("MSG-TESTS:", (global.window.__MSG_TESTS__ || []).join(" | "));
 process.exit(failed ? 1 : 0);
