@@ -72,11 +72,13 @@ const TEST_TAIL = `
   var calBad=[];
   calA.forEach(function(c){
     if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(c.date||'')) calBad.push(c.id+':日期非法('+c.date+')');
-    if((c.date||'')<TODAY_STR) calBad.push(c.id+':事件日期在过去');
     if(!c.key) calBad.push(c.id+':key=false 会被渲染成自定义事件（带删除按钮）');
     if(c.tag==='分红'&&!/每 10 股派/.test(c.preview||'')) calBad.push(c.id+':分红条目缺派息额');
+    /* 未来性只对**后端数据**断言：内置兜底是 2026-08 的历史宏观事件，日期必然在过去。
+       若连兜底都纳入断言，一旦后端 calendar 缺失就会拦下整个部署（行情/快讯一起停）。 */
+    if(KEY_EVENTS_FROM_BACKEND && (c.date||'')<TODAY_STR) calBad.push(c.id+':事件日期在过去');
   });
-  if(calA.length>6){
+  if(KEY_EVENTS_FROM_BACKEND && calA.length>6){
     var uniqDay={}; calA.forEach(function(c){uniqDay[c.date]=1;});
     if(Object.keys(uniqDay).length<=1) calBad.push('日历 '+calA.length+' 条全部落在同一天（每日名额分摊失效）');
   }
@@ -142,6 +144,18 @@ const leaks = [];
   probe(reviewHTML, "复盘面板数值泄漏");
   probe(gridAll, "行情面板数值泄漏");
 }
+/* 数据陈旧提示可见性（2026-09-24）：
+   _gen_review.js 在「本轮盘后抓取失败、不得不沿用旧复盘」时会写 review.stale.inherited=true，
+   前端必须在复盘面板顶部显著提示。**数据说陈旧、页面却不提示**正是此前连续多日沿用旧复盘
+   却无人察觉的机制，所以这里把它变成硬断言：一边为真、另一边为假即判失败。 */
+let dataStale = false;
+try {
+  const dbJson = JSON.parse(fs.readFileSync(dir + "/data.json", "utf8"));
+  dataStale = !!(dbJson.review && dbJson.review.stale && dbJson.review.stale.inherited);
+} catch (e) {}
+const staleShown = reviewHTML.indexOf("不是当日数据") >= 0;
+if (dataStale && !staleShown) contractIssues.push("复盘 stale.inherited=true 但页面未渲染陈旧提示条 → 陈旧不可见（静默沿用旧数据的复发）");
+if (!dataStale && staleShown) contractIssues.push("复盘数据为当日却渲染了陈旧提示条 → 误报");
 const reviewOK = modCount === 10 && reviewHTML.includes("涨停梯队") && reviewHTML.includes("后市展望") && !/undefined|NaN|null/.test(reviewHTML);
 console.log("meta:", meta);
 console.log("panels filled:", gridIds.join(","));
@@ -151,6 +165,7 @@ console.log("review panel:", reviewOK ? "OK (10模块)" : "MISSING/不完整 (mo
 console.log("bad tokens (NaN/Infinity/异常):", bad.length ? bad : "NONE");
 console.log("数值泄漏 (null/undefined/NaN):", leaks.length ? leaks : "NONE");
 console.log("contract:", contractIssues.length ? contractIssues.join(" | ") : "OK");
+console.log("复盘陈旧提示:", dataStale ? (staleShown ? "数据陈旧且已提示" : "❌ 数据陈旧但未提示") : "数据为当日（无需提示）");
 /* 退出码即闸门：CI 不再用 `|| echo` 吞掉失败——校验不过就不部署（宁停更，不部署坏产物）
    2026-09-24：此前 reviewOK 只打印、不参与判定，复盘面板坏掉照常上线。现一并纳入闸门。
    2026-09-24 补充：页面内单元测试（TEST_TAIL）里的日历硬断言也改为进闸门（__MSG_FAIL__）。 */
