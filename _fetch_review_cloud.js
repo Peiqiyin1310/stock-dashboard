@@ -218,12 +218,21 @@ async function fetchVolRatio() {
 
 /* 板块宽度：接口 pz 硬上限 100 条（调大无效），必须分页拉全量再统计。
    此前用「涨幅前20 + 垫底12」的样本算占比，实测 62.5% vs 真实 7.5%，方向完全反了
-   （2026-09-15 大跌日被判成"板块宽度宽"）。 */
+   （2026-09-15 大跌日被判成"板块宽度宽"）。
+   2026-09-24 再修：逐页必须容错。此前任一分页抛错会让整个函数 reject，被外层
+   .catch(()=>[]) 吞成空数组 → allInd=[] → upRatio=null → 页面显示"上涨板块 null%"
+   （CI 侧 9/9 必现）。现在单页失败只丢弃该页并保留已得数据 + 落一条日志。 */
 async function fetchSectorBreadth(fs) {
   const out = [];
   for (let pn = 1; pn <= 8; pn++) {
-    const j = await jgetAny("/api/qt/clist/get?pn=" + pn + "&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3&fs=" + fs + "&ut=" + UT + "&fields=f3,f14");
-    const rows = ((j.data && j.data.diff) || []).filter((x) => x.f14 && x.f3 != null);
+    let rows = [];
+    try {
+      const j = await jgetAny("/api/qt/clist/get?pn=" + pn + "&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3&fs=" + fs + "&ut=" + UT + "&fields=f3,f14");
+      rows = ((j.data && j.data.diff) || []).filter((x) => x.f14 && x.f3 != null);
+    } catch (e) {
+      console.log("[review] 板块宽度第 " + pn + " 页抓取失败（已得 " + out.length + " 条，继续用）: " + e.message);
+      break;
+    }
     if (!rows.length) break;
     out.push(...rows);
     if (rows.length < 100) break;
@@ -247,12 +256,13 @@ async function fetchSectors() {
   const IND = "m:90+t:2+f:!50", CON = "m:90+t:3+f:!50";
 
   // 行业/概念：涨跌幅榜（po=1 降序取头部=领涨；po=0 升序取头部=垫底）
-  const [indUp, indDown, conUp, conDown, allInd] = await Promise.all([
+  // 注意：不把 fetchSectorBreadth 放进这个 Promise.all —— 它与 4 个榜单请求同时开 5 条连接时
+  // 更容易被 push2 断连（socket hang up），而它一失败整段宽度就没了。改为随后串行执行。
+  const [indUp, indDown, conUp, conDown] = await Promise.all([
     jgetAny(q(IND, "f3", 1, 20)),
     jgetAny(q(IND, "f3", 0, 12)),
     jgetAny(q(CON, "f3", 1, 20)),
     jgetAny(q(CON, "f3", 0, 12)),
-    fetchSectorBreadth(IND).catch(() => []),
   ]);
   const rowsOf = (j) => ((j.data && j.data.diff) || []).filter((x) => x.f14);
   const iUp = rowsOf(indUp), iDn = rowsOf(indDown), cUp = rowsOf(conUp), cDn = rowsOf(conDown);
@@ -271,8 +281,11 @@ async function fetchSectors() {
   const conceptTop = cUp.slice(0, 5).map((x) => mk(x, true));
   const conceptBottom = cDn.slice(0, 3).map((x) => mk(x, false));
 
-  // 板块宽度：全量口径（分页拉全 496 个行业）
+  // 板块宽度：全量口径（分页拉全 496 个行业），放在最后串行跑，避开并发争抢
+  await sleep(300);
+  const allInd = await fetchSectorBreadth(IND).catch(() => []);
   const upRatio = allInd.length ? round1((allInd.filter((x) => x.f3 > 0).length / allInd.length) * 100) : null;
+  if (upRatio == null) console.log("[review] 板块宽度：行业全量未取到，本轮回退（不再输出 null%）");
   return { plateTop, plateBottom, plateFlowTop, plateFlowBottom, conceptTop, conceptBottom, upRatio };
 }
 
@@ -332,10 +345,15 @@ async function fetchReviewSnapshot(prevReview) {
 
   const ur = zt.uplimit && idx.red ? round1(idx.red / Math.max(idx.green, 1)) : 0;
   const pctAvg = (idx.sh.pct + idx.sz.pct + idx.cyb.pct) / 3;
+  // 板块宽度文案：upRatio 可能为 null（全量分页没抓到），此时给中性兜底文案，
+  // 绝不把 null 拼进字符串（此前会渲染成"窄（上涨板块 null%）"并连过 9 天校验）
+  const swText = sec.upRatio == null
+    ? "暂缺（行业全量未取到）"
+    : (sec.upRatio >= 60 ? "宽" : sec.upRatio >= 40 ? "中" : "窄") + "（上涨板块 " + sec.upRatio + "%）";
   const profile = {
     sentiment: stage + "（涨停 " + zt.uplimit + " 只" + (zt.zbrate != null ? "，炸板率 " + zt.zbrate + "%" : "") + "）",
     cap: idx.sh.pct >= idx.cyb.pct ? "沪指领涨，大盘强于双创" : "创业板领涨，小盘强于大盘",
-    sectorWidth: sec.upRatio >= 60 ? "宽（上涨板块 " + sec.upRatio + "%）" : sec.upRatio >= 40 ? "中（上涨板块 " + sec.upRatio + "%）" : "窄（上涨板块 " + sec.upRatio + "%）",
+    sectorWidth: swText,
     stockWidth: ur >= 1.2 ? "普涨（上涨 " + idx.red + " 家，涨跌比 " + ur + "）" : ur < 0.9 ? "分化（上涨 " + idx.red + " 家，涨跌比 " + ur + "）" : "均衡（上涨 " + idx.red + " 家，涨跌比 " + ur + "）",
     volume: "成交 " + (idx.money / 10000).toFixed(2) + " 万亿",
     trendShort: pctAvg > 0.3 ? "上行" : pctAvg < -0.3 ? "回调" : "震荡",
