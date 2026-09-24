@@ -109,16 +109,36 @@ const cards = (gridAll.match(/class="card(\s|")/g) || []).length;
 const ids = (gridAll.match(/id="c-[^"]+"/g) || []);
 const reviewHTML = store["review-panel"] ? store["review-panel"].innerHTML : "";
 const modCount = (reviewHTML.match(/rv-mod-head/g) || []).length;
-const reviewOK = modCount === 10 && reviewHTML.includes("涨停梯队") && reviewHTML.includes("后市展望") && !/undefined|NaN/.test(reviewHTML);
+/* 数值泄漏扫描：NaN/Infinity/异常 之外还必须查 null。
+   2026-09-24：复盘"板块宽度"曾渲染成「窄（上涨板块 null%）」并连续 9 天通过校验——
+   旧扫描只认 undefined/NaN，不认 null（且 `null >= 60`、`null >= 40` 均为 false，
+   静默落进"窄"分支，全程不抛错）。
+   这里按「值位置」判定：null/undefined/NaN 后面紧跟 % / 中文 / 收尾标点 / 标签结束才算泄漏，
+   避免误伤正文里偶然出现的英文单词。 */
+const LEAK = /(?:null|undefined|NaN)(?=[%\u4e00-\u9fa5）)，、。；：]|<\/|$)/;
+const leaks = [];
+{
+  const probe = (s, what) => {
+    const m = s.match(LEAK);
+    if (!m) return;
+    const at = m.index;
+    leaks.push(what + " → …" + s.slice(Math.max(0, at - 26), at + 10).replace(/\s+/g, " ") + "…");
+  };
+  probe(reviewHTML, "复盘面板数值泄漏");
+  probe(gridAll, "行情面板数值泄漏");
+}
+const reviewOK = modCount === 10 && reviewHTML.includes("涨停梯队") && reviewHTML.includes("后市展望") && !/undefined|NaN|null/.test(reviewHTML);
 console.log("meta:", meta);
 console.log("panels filled:", gridIds.join(","));
 console.log("card divs:", cards);
 console.log("card ids:", ids.join(", "));
 console.log("review panel:", reviewOK ? "OK (10模块)" : "MISSING/不完整 (mod="+modCount+")");
 console.log("bad tokens (NaN/Infinity/异常):", bad.length ? bad : "NONE");
+console.log("数值泄漏 (null/undefined/NaN):", leaks.length ? leaks : "NONE");
 console.log("contract:", contractIssues.length ? contractIssues.join(" | ") : "OK");
-// 退出码即闸门：CI 不再用 `|| echo` 吞掉失败——校验不过就不部署（宁停更，不部署坏产物）
-const failed = bad.length > 0 || contractIssues.length > 0;
+/* 退出码即闸门：CI 不再用 `|| echo` 吞掉失败——校验不过就不部署（宁停更，不部署坏产物）
+   2026-09-24：此前 reviewOK 只打印、不参与判定，复盘面板坏掉照常上线。现一并纳入闸门。 */
+const failed = bad.length > 0 || contractIssues.length > 0 || leaks.length > 0 || !reviewOK;
 console.log(failed ? "FAIL" : "PASS");
 console.log("MSG-TESTS:", (global.window.__MSG_TESTS__ || []).join(" | "));
 process.exit(failed ? 1 : 0);
