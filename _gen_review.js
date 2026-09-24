@@ -186,6 +186,11 @@ async function fetchOil() {
   if (S.profile) S.profile.stockWidth = cleanNull(S.profile.stockWidth, "暂缺（本轮未取到涨跌家数）");
   if (S.profile) S.profile.sentiment = cleanNull(S.profile.sentiment, "暂缺（本轮未取到涨停数据）");
   if (S.profile) S.profile.volume = cleanNull(S.profile.volume, "暂缺（本轮未取到成交额）");
+  /* 已废弃字段清理：估值 pb / div 恒为 null 的死字段（中证 index-perf 根本没有市净率/股息率），
+     2026-09-24 已从 _fetch_review_cloud.js 的 fetchValuation 返回值里摘掉，但旧 data.json 里
+     还留着这两个键，会通过「抓取失败 → 继承 prev.valuation」的路径长期复活（同一类坑：沿用旧值时
+     必须同时规整旧值）。这里做最后一道兜底，不管来自抓取 / 继承 / 内置种子，一律剔除。 */
+  if (S.valuation && typeof S.valuation === "object") { delete S.valuation.pb; delete S.valuation.div; }
   db.review = {
     tradeDate: TRADE_DATE,
     generatedAt: new Date().toISOString(),
