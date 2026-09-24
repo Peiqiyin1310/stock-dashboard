@@ -1476,7 +1476,12 @@ function renderReview(){
       +`<div class="section-title" style="margin-top:10px">后市展望</div>`+rvTable(['维度','要点'],outlookRows)));
   }
 
-  p.innerHTML=`<div class="meta" style="padding:0 0 10px">复盘 ${R.tradeDate} · 更新于 ${new Date(R.generatedAt).toLocaleString('zh-CN',{hour12:false})}<span class="meta-src"> · 数据源：东方财富(盘面/资金/涨停池) + 腾讯(K线) + 中证指数(估值) + 中债登(利率) + 新浪(外汇/快讯)</span> · 情绪阶段与展望为规则自动推演，非投资建议</div>`+M.join('');
+  /* 陈旧数据显著提示（2026-09-24）：本轮抓取失败、不得不沿用旧复盘时，
+     顶部「更新于 <今天>」会让人误以为数据是今天的——必须显式说明沿用了哪天的结果。 */
+  const staleTip=(R.stale&&R.stale.inherited)
+    ? `<div class="banner-danger" style="margin:0 0 10px">⚠️ 本轮盘后抓取失败（${cell(R.stale.reason,'原因未记录')}），下方复盘沿用 ${cell(R.stale.from||R.tradeDate,'上一交易日')} 的结果，<b>不是当日数据</b>。行情与快讯仍为实时。</div>`
+    : '';
+  p.innerHTML=staleTip+`<div class="meta" style="padding:0 0 10px">复盘 ${R.tradeDate} · 更新于 ${new Date(R.generatedAt).toLocaleString('zh-CN',{hour12:false})}<span class="meta-src"> · 数据源：东方财富(盘面/资金/涨停池) + 腾讯(K线) + 中证指数(估值) + 中债登(利率) + 新浪(外汇/快讯)</span> · 情绪阶段与展望为规则自动推演，非投资建议</div>`+M.join('');
 }
 function switchTab(id){
   state.cur=id;
@@ -1723,9 +1728,12 @@ const KEY_EVENTS_FALLBACK=[
   {id:'k-cn-lpr-0921', date:'2026-09-21', tag:'利率', key:true, name:'中国 LPR 报价',
    preview:'20日逢周末顺延至21日。已连续 15 个月未变。', result:''},
 ];
-/* 优先用后台注入的 calendar（_gen_calendar.js 每5分钟回填真实结果），否则用内置兜底 */
-let KEY_EVENTS = ((typeof DB!=='undefined') && DB.calendar && DB.calendar.events && DB.calendar.events.length)
-  ? DB.calendar.events : KEY_EVENTS_FALLBACK;
+/* 优先用后台注入的 calendar（_gen_calendar.js 每轮刷新真实除权除息排期），否则用内置兜底。
+   KEY_EVENTS_FROM_BACKEND 供校验脚本区分「后端数据」与「兜底常量」：
+   兜底常量是 2026-08 的历史宏观事件，日期必然在过去——若不区分，校验会因兜底而失败，
+   而部署被拦下会让行情/快讯一起停更，比显示一份旧日历更糟。 */
+const KEY_EVENTS_FROM_BACKEND=!!((typeof DB!=='undefined') && DB.calendar && DB.calendar.events && DB.calendar.events.length);
+let KEY_EVENTS = KEY_EVENTS_FROM_BACKEND ? DB.calendar.events : KEY_EVENTS_FALLBACK;
 /* 当前选中的日历项，重绘后自动恢复，避免刷新打断阅读 */
 let CAL_SEL=null;
 /* 后台 calendar.json 实时刷新：内容有变化才重绘（与新闻同机制） */
