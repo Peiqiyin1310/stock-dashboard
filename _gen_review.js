@@ -162,6 +162,18 @@ async function fetchOil() {
     .slice(0, 8).map((m) => ({ time: m.time, title: m.title, level: m.level, dir: m.dir, assets: m.assets }));
 
   const S = SNAPSHOT;
+  /* 迁移期防护：抓取失败时会沿用 data.json 里的旧复盘，而旧值里可能残留
+     "上涨板块 null%" 这类坏文案（见 _fetch_review_cloud.js 的板块宽度修复）。
+     校验闸门现在会拦 null → 一旦沿用旧值就会导致整个部署停摆（行情/快讯也一起停），
+     所以这里把历史坏值就地规整掉。新抓到的数据本身已是干净文案，不依赖此步。 */
+  const cleanNull = (s, fallback) => {
+    if (typeof s !== "string") return s;
+    return s.indexOf("null") >= 0 ? fallback : s;
+  };
+  if (S.profile) S.profile.sectorWidth = cleanNull(S.profile.sectorWidth, "暂缺（本轮未取到行业全量）");
+  if (S.profile) S.profile.stockWidth = cleanNull(S.profile.stockWidth, "暂缺（本轮未取到涨跌家数）");
+  if (S.profile) S.profile.sentiment = cleanNull(S.profile.sentiment, "暂缺（本轮未取到涨停数据）");
+  if (S.profile) S.profile.volume = cleanNull(S.profile.volume, "暂缺（本轮未取到成交额）");
   db.review = {
     tradeDate: TRADE_DATE,
     generatedAt: new Date().toISOString(),
