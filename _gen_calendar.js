@@ -67,12 +67,24 @@ const EVENTS = [
     match: [/LPR|贷款市场报价利率/] },
 ];
 
-// 结果性词汇：命中才算「已出结果」，避免把"预期升温"当成结果
-const RESULT_WORDS = /维持|不变|加息|降息|上调|下调|公布|出炉|升至|降至|超预期|不及预期|报|增长|下滑|通过/;
+// 结果性词汇：命中才算「已出结果」
+// （移除原来过宽的 `报`——它会命中"报道/报告"，把无关稿件也算成结果）
+const RESULT_WORDS = /维持|不变|加息|降息|上调|下调|公布|出炉|升至|降至|超预期|不及预期|增长|下滑|通过|报收|报价/;
+/* 预测/观点词：命中则**不视为结果**。
+   2026-09-24 核查发现日历把预测当结果，例如杰克逊霍尔年会那条的结果是
+   「【三菱日联预计美联储本月加息25基点】」——这是券商的预测，不是会议结果。
+   项目早前就把「结果文本不得含 预计/预期/或将/研报 等预测词」写进了规范，但代码从未实现。 */
+const FORECAST_WORDS = /预计|预期|或将|有望|可能|概率|料将|分析师|研报|研究|展望|认为|观点|市场定价|调查显示|倾向于|预计将|机构|券商/;
 
+/* 统一按北京时间取日期。
+   此前用本地 getter（getFullYear/getMonth/getDate），而 GitHub Actions runner 的本地时区是 UTC：
+   实测 2026-09-23T23:28Z 那一轮产物里 calendar.today = "2026-09-23"，而北京已是 09-24。
+   即每天北京 00:00~08:00 期间 today 都会落后一天，导致事件「是否已到日期」判断偏移。
+   与 _gen.js / _gen_review.js 的既定口径保持一致：+8h 后用 getUTC* 读。 */
+const bjShift = (d) => new Date(d.getTime() + 8 * 3600 * 1000);
 function todayStr() {
-  const t = new Date();
-  return t.getFullYear() + "-" + String(t.getMonth() + 1).padStart(2, "0") + "-" + String(t.getDate()).padStart(2, "0");
+  const t = bjShift(new Date());
+  return t.getUTCFullYear() + "-" + String(t.getUTCMonth() + 1).padStart(2, "0") + "-" + String(t.getUTCDate()).padStart(2, "0");
 }
 
 // ---------- 抓取：复用 _gen_news.js 的多源逻辑 ----------
@@ -127,8 +139,10 @@ function parseTime(ct) {
   return null;
 }
 function fmtLocal(d) {
+  // 同上：本地时区是 UTC 时会把“7小时前”的北京快讯标成前一天，统一改成北京时间
+  const t = bjShift(d);
   const p = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
 }
 
 async function fetchSina() {
@@ -204,6 +218,7 @@ function matchResult(ev, pool, today) {
     if (!ev.match.some((re) => re.test(t))) continue;
     if (ev.need && ev.need.length && !ev.need.some((re) => re.test(t))) continue;
     if (!RESULT_WORDS.test(t)) continue;
+    if (FORECAST_WORDS.test(t)) continue;          // 预测/研报/观点不算结果
     if (n.time && n.time.slice(0, 10) < ev.date) continue;
     hits.push(n);
     if (hits.length >= 2) break;
