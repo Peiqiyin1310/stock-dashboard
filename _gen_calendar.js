@@ -195,6 +195,40 @@ function buildDividendEvents(rows, today) {
   return picked.sort((a, b) => a.date.localeCompare(b.date) || a.ex.localeCompare(b.ex) || (b.pool ? 1 : -1));
 }
 
+/* ===== 周期性宏观锚点（2026-09-24 新增）=====
+   原 EVENTS 里的宏观事件是**一次性硬编码**，过期即永久消失（这正是日历变空的主因）。
+   这里改为按**公布惯例**滚动推算未来日期，标 est=true 让前端打「约」标，绝不冒充确定日期：
+     · 中国 LPR 报价：每月 20 日 09:15，遇周末顺延至下一工作日
+     · 中国官方制造业 PMI：每月最后一个工作日 09:30
+     · 美国非农 NFP：每月第一个周五 20:30（北京时间，夏令时）
+   FOMC / CPI 等日期不规律，宁可不放，也不编。规则推导保证日历**永不为空**，
+   即使东财分红接口整轮挂掉，面板仍有 3 条真实存在的日程可看。 */
+function buildRecurringMacro(today, days) {
+  const out = [];
+  const end = addDaysStr(today, days);
+  const push = (date, tag, name, preview, match, need) => {
+    if (date < today || date > end) return;
+    out.push({ id: "mk-" + date + "-" + tag + "-" + out.length, date, tag, name, preview, key: true, est: true, _match: match, _need: need });
+  };
+  for (let i = 0; i <= days; i++) {
+    const ds = addDaysStr(today, i);
+    const d = new Date(ds + "T00:00:00Z");
+    const y = d.getUTCFullYear(), m = d.getUTCMonth();
+    const dom = d.getUTCDate(), dow = d.getUTCDay();                        // dow: 0=周日
+    const dim = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();               // 当月天数
+    // 月末最后一个工作日
+    let lastBiz = dim;
+    { const lw = new Date(Date.UTC(y, m, lastBiz)).getUTCDay();
+      if (lw === 0) lastBiz -= 2; else if (lw === 6) lastBiz -= 1; }
+    const biz = dow !== 0 && dow !== 6;
+    if (biz && dom === 20) push(ds, "利率", "中国 LPR 报价", "每月 20 日 09:15 公布 1 年期与 5 年期以上 LPR 报价。", [/LPR|贷款市场报价利率/], null);
+    if (dow === 1 && (dom === 21 || dom === 22)) push(ds, "利率", "中国 LPR 报价", "20 日逢周末，按惯例顺延至本日公布。", [/LPR|贷款市场报价利率/], null);
+    if (biz && dom === lastBiz) push(ds, "数据", "中国官方 PMI", "月末最后一个工作日 09:30 公布制造业与非制造业 PMI。", [/PMI|采购经理/], [/制造业|非制造业|指数/]);
+    if (dow === 5 && dom <= 7) push(ds, "数据", "美国非农 NFP", "通常为每月第一个周五 20:30（北京时间）公布，遇假期可能顺延一周。", [/非农/], [/新增|失业率|就业|万人/]);
+  }
+  return out;
+}
+
 // ---------- 抓取：复用 _gen_news.js 的多源逻辑 ----------
 function get(url, headers = {}) {
   return new Promise((res, rej) => {
@@ -369,11 +403,13 @@ function matchResult(ev, pool, today) {
     console.log(`[calendar] 除权除息抓取成功：东财原始 ${rows.length} 条 → 窗口内采用 ${divEvents.length} 条（★候选池命中 ${divEvents.filter((e) => e.pool).length}）`);
   } catch (e) {
     divStale = true;
-    divEvents = prevEvents.filter((x) => String(x.id || "").indexOf("div-") === 0);
-    console.log(`[calendar] 除权除息抓取失败，沿用上一轮分红条目 ${divEvents.length} 条：${e.message}`);
+    /* 沿用上一轮时必须剔除**已过期**条目：否则「事件日期在过去」会被校验闸门拦下，
+       导致整站（行情/快讯）跟着停更——这正是「严格闸门 × 沿用旧值」的致命组合。 */
+    divEvents = prevEvents.filter((x) => String(x.id || "").indexOf("div-") === 0 && String(x.date || "") >= today);
+    console.log(`[calendar] 除权除息抓取失败，沿用上一轮分红条目 ${divEvents.length} 条（已剔除过期）：${e.message}`);
   }
 
-  /* —— 宏观事件：只输出**未来**日期 ——
+  /* —— 宏观事件 A：一次性事件表（只输出**未来**日期）——
      过去事件的归档不再进入面板。原因：它们的结果多来自券商观点而非官方结果
      （线上 9/10 条含预测词），且「日期已过 + 无结果」会长期显示为「结果待更新」。
      历史条目仍保留在 EVENTS 数组里、seed 不删，日后新增未来事件可直接复用同一套匹配逻辑。 */
@@ -389,12 +425,28 @@ function matchResult(ev, pool, today) {
     return e;
   });
 
-  const events = divEvents.concat(macroEvents)
+  /* —— 宏观事件 B：周期性锚点（按公布惯例滚动推算，est=true → 前端打「约」标）——
+     结果同样由快讯回填，但受 FORECAST_WORDS 约束（不再把券商预测当结果）；
+     id 含日期，每月变化，不会把上月结果留到下月显示。 */
+  const macroRecurring = buildRecurringMacro(today, DIV_WINDOW_DAYS).map((ev) => {
+    const live = matchResult({ date: ev.date, match: ev._match, need: ev._need }, pool, today);
+    const kept = FORECAST_WORDS.test(prevById[ev.id] || "") ? "" : (prevById[ev.id] || "");
+    const e = Object.assign({}, ev);
+    delete e._match; delete e._need;
+    e.result = live || kept || "";
+    e.resultAt = e.result ? new Date().toISOString() : "";
+    e.src = live ? "实时快讯" : (kept ? "已存档" : "");
+    return e;
+  });
+  const allMacro = macroRecurring.concat(macroEvents);
+
+  const events = divEvents.concat(allMacro)
     .sort((a, b) => a.date.localeCompare(b.date) || String(a.id).localeCompare(String(b.id)));
   const filled = events.filter((e) => e.result).length;
   const payload = {
     updated: new Date().toISOString(), today, filled, total: events.length, events,
     divCount: divEvents.length, divPool: divEvents.filter((e) => e.pool).length, divStale,
+    macroCount: allMacro.length,
   };
 
   try {
@@ -407,7 +459,7 @@ function matchResult(ev, pool, today) {
   // changed=1 表示条目/结果有变化，据此可判断是否需要重建部署；无变化则静默跳过，省资源
   const sig = (arr) => arr.map((e) => e.id + ":" + (e.result || "")).join("|");
   const changed = sig(events) === sig(prevEvents) ? 0 : 1;
-  console.log(`[calendar] changed=${changed} · 分红 ${divEvents.length} 条（★候选池 ${payload.divPool}${divStale ? " ·沿用旧值" : ""}）· 宏观未来 ${macroEvents.length} 条 · filled=${filled}/${events.length} · today=${today}`);
+  console.log(`[calendar] changed=${changed} · 分红 ${divEvents.length} 条（★候选池 ${payload.divPool}${divStale ? " ·沿用旧值" : ""}）· 宏观 ${allMacro.length} 条（周期锚点 ${macroRecurring.length}）· filled=${filled}/${events.length} · today=${today}`);
   divEvents.filter((e) => e.pool).forEach((e) => console.log(`   ★ ${e.date} ${e.name} ｜ ${e.preview}`));
-  macroEvents.forEach((e) => console.log(`   ${e.date} ${e.name} → ${e.result ? "✅ [" + e.src + "] " + e.result.slice(0, 46) : "⏳ 待公布"}`));
+  allMacro.forEach((e) => console.log(`   ${e.date} ${e.tag} ${e.name} → ${e.result ? "✅ [" + e.src + "] " + e.result.slice(0, 46) : "⏳ 待公布"}`));
 })();
