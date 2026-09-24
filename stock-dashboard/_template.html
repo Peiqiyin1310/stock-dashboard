@@ -1753,6 +1753,10 @@ function evStatus(c){
   return 'soon';
 }
 const EV_LABEL={done:'✅ 已公布', today:'📅 今日公布', soon:'⏳ 即将公布', miss:'⚪ 结果待更新', custom:'自定义'};
+/* 分红条目（tag=分红）不是「待公布结果」，而是已定档的除权排期——沿用「即将公布/结果公布后自动更新」
+   会让人以为在等一条公告。单独给文案，不改配色类（ev-soon 等仍复用）。 */
+const isDivEvent=c=>c&&c.tag==='分红';
+const evLabel=c=>isDivEvent(c)?(c.date===TODAY_STR?'📅 今日除权登记':'📅 待除权'):EV_LABEL[evStatus(c)];
 function evCardHTML(c){
   if(!c.key){
     return `<div class="ev-card ev-custom">
@@ -1764,10 +1768,10 @@ function evCardHTML(c){
   }
   const st=evStatus(c);
   const body=(st==='done')?c.result:c.preview;
-  const tip=(st==='done')?'':'<div class="ev-tip">📌 结果公布后将自动更新本卡片</div>';
+  const tip=(st==='done'||isDivEvent(c))?'':'<div class="ev-tip">📌 结果公布后将自动更新本卡片</div>';
   return `<div class="ev-card ev-${st}">
     <div class="ev-head">
-      <span class="ev-badge ev-${st}">${EV_LABEL[st]}</span>
+      <span class="ev-badge ev-${st}">${evLabel(c)}</span>
       <span class="ev-tag">${c.tag}</span>
       <span class="ev-key">重点</span>
       ${c.est?'<span class="cal-est">约</span>':''}
@@ -1994,7 +1998,7 @@ function renderNews(){
     return fa ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date);
   }).map(c=>{
     const st=evStatus(c);
-    return `<div class="keylist-row" data-kid="${c.id}"><span class="ev-badge ev-${st}">${EV_LABEL[st]}</span><span class="kl-date">${c.date.slice(5)}</span><span class="kl-name">${c.name}</span></div>`;
+    return `<div class="keylist-row" data-kid="${c.id}"><span class="ev-badge ev-${st}">${evLabel(c)}</span><span class="kl-date">${c.date.slice(5)}</span><span class="kl-name">${c.name}</span></div>`;
   }).join('');
   p.innerHTML=`
     <div class="legend">
