@@ -74,12 +74,19 @@ const bjOf = () => { const d = new Date(Date.now() + 8 * 3600 * 1000);
     min: d.getUTCHours() * 60 + d.getUTCMinutes(), wd: (d.getUTCDay() + 6) % 7 + 1 }; };
 const bjNow = bjOf();
 let snapshotUsed = null;
+/* 数据陈旧标记（2026-09-24 新增）：
+   交易日盘后本该刷新复盘，但云端抓取失败时会静默沿用 data.json 里的旧复盘——
+   页面上只有 generatedAt 在动，「复盘 09-23 · 更新于 <今天>」看起来毫无异常，
+   结果连续多日沿用旧复盘而无人察觉（本机核查：东财指数接口在 CI 出口 IP 上多数轮次 502）。
+   现在只要「本该拿到当日数据却没拿到」就置位，前端显著提示。 */
+let staleInfo = null;
+const freshExpected = () => bjNow.wd <= 5 && bjNow.min >= 15 * 60 + 5;
 try {
   const s = JSON.parse(fs.readFileSync(SNAP_FILE, "utf8"));
   if (s && s.tradeDate === bjNow.date) snapshotUsed = s;
 } catch (e) {}
 async function ensureSnapshot() {
-  if (!snapshotUsed && bjNow.wd <= 5 && bjNow.min >= 15 * 60 + 5) {
+  if (!snapshotUsed && freshExpected()) {
     try {
       const cloud = require("./_fetch_review_cloud.js");
       const oldDb = JSON.parse(fs.readFileSync(DATA, "utf8"));
@@ -87,7 +94,10 @@ async function ensureSnapshot() {
       console.log("[review] 东财公开接口抓取当日盘后数据 tradeDate=" + snapshotUsed.tradeDate);
     } catch (e) {
       if (e.nonTradingDay) console.log("[review] 今日非交易日，跳过复盘更新（" + e.message + "），保留上一交易日复盘");
-      else console.log("[review] 云端抓取失败，保持旧快照:", e.message);
+      else {
+        staleInfo = { reason: e.message };
+        console.log("[review] 云端抓取失败，保持旧快照:", e.message);
+      }
     }
   }
   if (snapshotUsed) {
@@ -103,10 +113,12 @@ async function ensureSnapshot() {
         TRADE_DATE = db2.review.tradeDate;
         SNAPSHOT = Object.assign({}, SNAPSHOT, db2.review);
         console.log("[review] 无当日快照，沿用 data.json 已有复盘 (" + TRADE_DATE + ")");
+        if (freshExpected() && !staleInfo) staleInfo = { reason: "未取到当日快照" };
         return;
       }
     } catch (e) {}
     console.log("[review] 无当日快照（未收盘/非交易日/抓取失败），回落内置历史快照 (" + TRADE_DATE + ")");
+    if (freshExpected() && !staleInfo) staleInfo = { reason: "未取到当日快照" };
   }
 }
 
@@ -177,6 +189,12 @@ async function fetchOil() {
   db.review = {
     tradeDate: TRADE_DATE,
     generatedAt: new Date().toISOString(),
+    /* 数据陈旧可见性：inherited=true 时前端在复盘面板顶部显著提示。
+       reason 必须剔除 null/undefined/NaN 字样——复盘面板整体会被校验脚本扫描
+       （reviewOK 里的 !/undefined|NaN|null/.test(reviewHTML)），带这些词会导致整站停更。 */
+    stale: staleInfo
+      ? { inherited: true, from: TRADE_DATE, reason: String(staleInfo.reason || "").replace(/null|undefined|NaN/g, "?").slice(0, 70), at: new Date().toISOString() }
+      : { inherited: false },
     breadth: S.breadth, trade: S.trade, profile: S.profile,
     zt: S.zt || null,
     valuation: S.valuation, macro: S.macro, fx, oil,
